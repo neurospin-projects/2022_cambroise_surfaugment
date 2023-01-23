@@ -467,7 +467,7 @@ if not os.path.isdir(checkpoint_dir):
 
 checkpoint_path = os.path.join(checkpoint_dir, "model_epoch_{}.pth")
 
-use_board = True
+use_board = False
 if args.epochs > 0 and use_board:
     board = Board(env=run_name)
 
