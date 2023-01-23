@@ -121,7 +121,7 @@ args.conv_filters = [int(item) for item in args.conv_filters.split("-")]
 
 
 # Prepare process
-setup_logging(level="debug", logfile=None)
+setup_logging(level="info", logfile=None)
 checkpoint_dir = os.path.join(args.outdir, "pretrain_barlow", "checkpoints")
 if not os.path.isdir(checkpoint_dir):
     os.makedirs(checkpoint_dir)
@@ -515,6 +515,8 @@ for epoch in range(start_epoch, args.epochs + 1):
         y2_lh = y2_lh.float().to(device)
         y1_rh = y1_rh.float().to(device)
         y2_rh = y2_rh.float().to(device)
+        print(y1_lh.shape)
+        print(y2_lh.shape)
         optimizer.zero_grad()
         with torch.cuda.amp.autocast():
             loss = model.forward((y1_lh, y1_rh), (y2_lh, y2_rh))
