@@ -27,7 +27,7 @@ from torch.distributions import Normal
 from torchvision.utils import make_grid
 from torchvision.transforms import Compose, RandomApply, ToPILImage
 from torchvision import transforms
-from surfify.models import SphericalVAE, SphericalGVAE, HemiFusionDecoder, HemiFusionEncoder
+from surfify.models import SphericalVAE, SphericalGVAE, HemiFusionDecoder, HemiFusionEncoder, SphericalHemiFusionEncoder
 from surfify.losses import SphericalVAELoss
 from surfify.utils import setup_logging, icosahedron, text2grid, grid2text, downsample_data, downsample
 from brainboard import Board
@@ -110,7 +110,9 @@ parser.add_argument(
     "--standardize", action="store_true",
     help="optionnally standardize input with statistics computed across"
          "the train dataset.")
-
+parser.add_argument(
+    "--reduce-lr", action="store_true",
+    help="optionnally reduces the learning rate during training.")
 
 args = parser.parse_args()
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -390,20 +392,6 @@ print(len(valid_loader))
 activation = "ReLU"
 n_features = len(metrics)
 
-encoder = HemiFusionEncoder(n_features, grid_size, args.latent_dim,
-                            fusion_level=args.fusion_level,
-                            conv_flts=args.conv_filters,
-                            activation=activation,
-                            batch_norm=args.batch_norm,
-                            return_dist=False)
-
-
-def off_diagonal(x):
-    # return a flattened view of the off-diagonal elements of a square matrix
-    n, m = x.shape
-    assert n == m
-    return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
-
 class SelectNthDim(nn.Module):
     def __init__(self, dim):
         super().__init__()
@@ -412,11 +400,33 @@ class SelectNthDim(nn.Module):
     def forward(self, x):
         return x[self.dim]
 
+if use_grid:
+    encoder = HemiFusionEncoder(n_features, grid_size, args.latent_dim,
+                                fusion_level=args.fusion_level,
+                                conv_flts=args.conv_filters,
+                                activation=activation,
+                                batch_norm=args.batch_norm,
+                                return_dist=False)
+    backbone = nn.Sequential(encoder, SelectNthDim(0))
+else:
+    backbone = SphericalHemiFusionEncoder(
+        n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
+        conv_flts=args.conv_filters, activation=activation,
+        batch_norm=args.batch_norm, conv_mode=args.conv,
+        cachedir=os.path.join(args.outdir, "cached_ico_infos"))
+
+
+def off_diagonal(x):
+    # return a flattened view of the off-diagonal elements of a square matrix
+    n, m = x.shape
+    assert n == m
+    return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
+
 class BarlowTwins(nn.Module):
     def __init__(self, args):
         super().__init__()
         self.args = args
-        self.backbone = nn.Sequential(encoder, SelectNthDim(0))
+        self.backbone = 
 
         # projector
         sizes = [args.latent_dim] + list(map(int, args.projector.split('-')))
@@ -450,7 +460,8 @@ model = BarlowTwins(args).to(device)
 
 
 optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
-# scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.3)
+if args.reduce_lr:
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.9)
 
 run_name = ("deepint_barlow_{}_surf_{}_features_fusion_{}_act_{}_bn_{}_conv_{}"
     "_latent_{}_wd_{}_{}_epochs_lr_{}_bs_{}_ba_{}_ima_{}_gba_{}_cutout_{}"
@@ -561,7 +572,8 @@ for epoch in range(start_epoch, args.epochs + 1):
                 best_saved_epoch = epoch
         # torch.save(model.backbone[0].state_dict(),
         #     os.path.join(checkpoint_dir, "encoder_epoch_{}.pth".format(epoch)))
-    # scheduler.step()
+    if args.reduce_lr:
+        scheduler.step()
 
 plt.plot(range(args.start_epoch, args.epochs + 1), losses, label="training")
 plt.plot(range(args.start_epoch, args.epochs + 1), valid_losses, label="validation")
