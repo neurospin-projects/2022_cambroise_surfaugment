@@ -341,11 +341,14 @@ if args.inter_modal_augment > 0 or args.batch_augment > 0:
     normalize = False
 
 on_the_fly_transform = dict()
+channels_to_switch = (1, 0)
+if use_grid:
+    channels_to_switch = (2, 0, 1)
 for modality in modalities:
     transformer = Transformer(["hard", "soft"])
     if args.standardize:
         transformer.register(scalers[modality])
-    transformer.register(Permute((2, 0, 1)))
+    transformer.register(Permute(channels_to_switch))
     if args.normalize:
         transformer.register(Normalize())
     if args.gaussian_blur_augment:
@@ -426,7 +429,7 @@ class BarlowTwins(nn.Module):
     def __init__(self, args):
         super().__init__()
         self.args = args
-        self.backbone = 
+        self.backbone = backbone
 
         # projector
         sizes = [args.latent_dim] + list(map(int, args.projector.split('-')))
