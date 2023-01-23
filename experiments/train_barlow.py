@@ -121,7 +121,7 @@ args.conv_filters = [int(item) for item in args.conv_filters.split("-")]
 
 
 # Prepare process
-setup_logging(level="info", logfile=None)
+setup_logging(level="debug", logfile=None)
 checkpoint_dir = os.path.join(args.outdir, "pretrain_barlow", "checkpoints")
 if not os.path.isdir(checkpoint_dir):
     os.makedirs(checkpoint_dir)
