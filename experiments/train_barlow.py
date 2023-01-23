@@ -348,7 +348,7 @@ for modality in modalities:
     transformer = Transformer(["hard", "soft"])
     if args.standardize:
         transformer.register(scalers[modality])
-    transformer.register(Permute(channels_to_switch))
+    # transformer.register(Permute(channels_to_switch))
     if args.normalize:
         transformer.register(Normalize())
     if args.gaussian_blur_augment:
