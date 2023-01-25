@@ -33,7 +33,7 @@ from surfify.utils import setup_logging, icosahedron, text2grid, grid2text, down
 from brainboard import Board
 
 from multimodaldatasets.datasets import DataManager, DataLoaderWithBatchAugmentation
-from augmentations import Permute, Normalize, Reshape
+from augmentations import Permute, Normalize, Reshape, Transformer
 import parse
 
 
@@ -45,11 +45,11 @@ parser.add_argument(
 parser.add_argument(
     "--datadir", metavar="DIR", help="data directory path.", required=True)
 parser.add_argument(
-    "--ico-order", default=7, type=int,
+    "--ico-order", default=6, type=int,
     help="the icosahedron order.")
-# parser.add_argument(
-#     "--conv", default="SpMa", choices=("DiNe", "RePa", "SpMa"),
-#     help="Wether or not to project on a 2d grid")
+parser.add_argument(
+    "--conv", default="DiNe", choices=("DiNe", "RePa", "SpMa"),
+    help="Wether or not to project on a 2d grid")
 parser.add_argument(
     "--outdir", metavar="DIR", help="output directory path.", required=True)
 parser.add_argument(
@@ -88,7 +88,7 @@ print(" ".join(sys.argv), file=stats_file)
 # Load the input cortical data
 modalities = ["surface-lh", "surface-rh"]
 metrics = ["thickness", "curv", "sulc"]
-use_grid = True#args.conv == "SpMa"
+use_grid = args.conv == "SpMa"
 transform = None
 batch_size = 128
 
@@ -207,38 +207,18 @@ if scaling:
             Reshape(input_shape),
         ])
 
+on_the_fly_transform = dict()
+for modality in modalities:
+    transformer = Transformer()
+    if args.standardize:
+        transformer.register(scalers[modality])
+    if use_grid:
+        channels_to_switch = (2, 0, 1)
+        transformer.register(Permute(channels_to_switch))
+    if args.normalize:
+        transformer.register(Normalize())
+    on_the_fly_transform[modality] = transformer
 
-class Transform:
-    def __init__(self, normalize=False, scaler=None):
-        channels_to_switch = (1, 0)
-        if use_grid:
-            channels_to_switch = (2, 0, 1)
-
-        self.transform = []
-
-        if scaler is not None:
-            self.transform.append(scaler)
-
-        self.transform += [
-            Permute(channels_to_switch),
-        ]
-        if normalize:
-            self.transform += [
-                Normalize()
-            ]
-
-        self.transform = transforms.Compose(self.transform)
-
-    def __call__(self, x):
-        y = self.transform(x)
-        return y
-
-normalize = args.normalize
-
-on_the_fly_transform = {
-    "surface-lh": Transform(normalize, scaler=scalers["surface-lh"]),
-    "surface-rh": Transform(normalize, scaler=scalers["surface-rh"])
-}
 
 # downsampler = wrapper_data_downsampler(args.outdir, to_order=args.ico_order)
 

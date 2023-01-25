@@ -316,14 +316,13 @@ if args.inter_modal_augment > 0 or args.batch_augment > 0:
     normalize = False
 
 on_the_fly_transform = dict()
-channels_to_switch = (1, 0)
-if use_grid:
-    channels_to_switch = (2, 0, 1)
 for modality in modalities:
     transformer = Transformer(["hard", "soft"])
     if args.standardize:
         transformer.register(scalers[modality])
-    # transformer.register(Permute(channels_to_switch))
+    if use_grid:
+        channels_to_switch = (2, 0, 1)
+        transformer.register(Permute(channels_to_switch))
     if args.normalize:
         transformer.register(Normalize())
     if args.gaussian_blur_augment:
@@ -334,7 +333,7 @@ for modality in modalities:
         transformer.register(transforms.ToTensor())
     if args.cutout:
         transform = Cutout(patch_size=np.ceil(np.array(input_shape)/4))
-        if use_grid:
+        if not use_grid:
             ico = backbone.ico[args.ico_order]
             # We want to set the maximum size size to barely 1/4 of the 
             # vertices. Since at each order, the number of vertices is
