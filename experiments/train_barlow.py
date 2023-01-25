@@ -27,7 +27,8 @@ from torch.distributions import Normal
 from torchvision.utils import make_grid
 from torchvision.transforms import Compose, RandomApply, ToPILImage
 from torchvision import transforms
-from surfify.models import SphericalVAE, SphericalGVAE, HemiFusionDecoder, HemiFusionEncoder, SphericalHemiFusionEncoder
+from surfify.models import HemiFusionEncoder, SphericalHemiFusionEncoder
+from surfify.augmentation import SphericalRandomCut
 from surfify.losses import SphericalVAELoss
 from surfify.utils import setup_logging, icosahedron, text2grid, grid2text, downsample_data, downsample
 from brainboard import Board
@@ -179,18 +180,45 @@ if use_grid:
     }
 else:
     order = 7
-    ico_verts, _ = icosahedron(order)
+    ico_verts, ico_tri = icosahedron(order)
     down_indices = []
     for low_order in range(order - 1, args.ico_order - 1, -1):
-        low_ico_verts, _ = icosahedron(low_order)
+        low_ico_verts, low_ico_tri = icosahedron(low_order)
         down_indices.append(downsample(ico_verts, low_ico_verts))
         ico_verts = low_ico_verts
+        ico_tri = low_ico_tri
     def transform(x):
         downsampled_data = downsample_data(x, 7 - args.ico_order, down_indices)
         return np.swapaxes(downsampled_data, 1, 2)
 
 input_shape = ((grid_size, grid_size, len(metrics)) if use_grid else
                (len(icosahedron(7)), len(metrics)))
+
+activation = "ReLU"
+n_features = len(metrics)
+
+class SelectNthDim(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, x):
+        return x[self.dim]
+
+if use_grid:
+    encoder = HemiFusionEncoder(n_features, grid_size, args.latent_dim,
+                                fusion_level=args.fusion_level,
+                                conv_flts=args.conv_filters,
+                                activation=activation,
+                                batch_norm=args.batch_norm,
+                                return_dist=False)
+    backbone = nn.Sequential(encoder, SelectNthDim(0))
+else:
+    backbone = SphericalHemiFusionEncoder(
+        n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
+        conv_flts=args.conv_filters, activation=activation,
+        batch_norm=args.batch_norm, conv_mode=args.conv,
+        cachedir=os.path.join(args.outdir, "cached_ico_infos"))
 
 kwargs = {
     "surface-rh": {"metrics": metrics},
@@ -282,59 +310,6 @@ if args.batch_augment > 0 or args.standardize:
                 p=(1, 0.1), p_corrupt=args.batch_augment,
                 groups=groups_valid[modality])
 
-class Transform:
-    def __init__(self, normalize=False, scaler=None):
-        self.transform, self.transform_prime = [], []
-
-        if scaler is not None:
-            self.transform.append(scaler)
-            self.transform_prime.append(scaler)
-
-        self.transform += [
-            Permute((2, 0, 1)),
-        ]
-        self.transform_prime += [
-            Permute((2, 0, 1)),
-        ]
-
-        if normalize:
-            self.transform += [
-                Normalize()
-            ]
-            self.transform_prime += [
-                Normalize()
-            ]
-        if args.gaussian_blur_augment:
-            self.transform += [
-                RescaleAsImage(metrics),
-                ToPILImage(),
-                GaussianBlur(p=1.0),
-                transforms.ToTensor(),
-            ]
-            self.transform_prime += [
-                RescaleAsImage(metrics),
-                ToPILImage(),
-                GaussianBlur(p=0.1),
-                transforms.ToTensor(),
-            ]
-
-        if args.cutout:
-            self.transform += [
-                Cutout(patch_size=np.ceil(np.array(input_shape)/4), p=1)
-            ]
-
-            self.transform_prime += [
-                Cutout(patch_size=np.ceil(np.array(input_shape)/4), p=0.5)
-            ]
-
-        
-        self.transform = transforms.Compose(self.transform)
-        self.transform_prime = transforms.Compose(self.transform_prime)
-
-    def __call__(self, x):
-        y1 = self.transform(x)
-        y2 = self.transform_prime(x)
-        return y1, y2
 
 normalize = args.normalize
 if args.inter_modal_augment > 0 or args.batch_augment > 0:
@@ -359,6 +334,15 @@ for modality in modalities:
         transformer.register(transforms.ToTensor())
     if args.cutout:
         transform = Cutout(patch_size=np.ceil(np.array(input_shape)/4))
+        if use_grid:
+            ico = backbone.ico[args.ico_order]
+            # We want to set the maximum size size to barely 1/4 of the 
+            # vertices. Since at each order, the number of vertices is
+            # multiplied by 4, the neighborhood to be considered is of
+            # order input_order - 1
+            transform = SphericalRandomCut(
+                ico.vertices, ico.triangles, ico.neighbor_indices,
+                patch_size=args.ico_order - 1)
         transformer.register(transform, pipeline="hard")
         transformer.register(transform, probability=0.5, pipeline="soft")
     on_the_fly_transform[modality] = transformer
@@ -391,32 +375,6 @@ valid_loader = DataLoaderWithBatchAugmentation(batch_transforms_valid,
 
 print(len(loader))
 print(len(valid_loader))
-
-activation = "ReLU"
-n_features = len(metrics)
-
-class SelectNthDim(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.dim = dim
-
-    def forward(self, x):
-        return x[self.dim]
-
-if use_grid:
-    encoder = HemiFusionEncoder(n_features, grid_size, args.latent_dim,
-                                fusion_level=args.fusion_level,
-                                conv_flts=args.conv_filters,
-                                activation=activation,
-                                batch_norm=args.batch_norm,
-                                return_dist=False)
-    backbone = nn.Sequential(encoder, SelectNthDim(0))
-else:
-    backbone = SphericalHemiFusionEncoder(
-        n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
-        conv_flts=args.conv_filters, activation=activation,
-        batch_norm=args.batch_norm, conv_mode=args.conv,
-        cachedir=os.path.join(args.outdir, "cached_ico_infos"))
 
 
 def off_diagonal(x):
@@ -586,7 +544,7 @@ plt.xlabel("Epoch")
 plt.ylabel("Loss")
 plt.savefig(os.path.join(checkpoint_dir, "losses.pdf"))
 
-torch.save(model.backbone[0].state_dict(),
+torch.save(model.backbone.state_dict(),
             os.path.join(checkpoint_dir, "encoder.pth"))
 
 if not os.path.exists(os.path.join(args.outdir, "pretrain_barlow", "setups.tsv")):
