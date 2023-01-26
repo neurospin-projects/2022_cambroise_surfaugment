@@ -543,7 +543,10 @@ plt.xlabel("Epoch")
 plt.ylabel("Loss")
 plt.savefig(os.path.join(checkpoint_dir, "losses.pdf"))
 
-torch.save(model.backbone.state_dict(),
+module_to_save = model.backbone
+if use_grid:
+    module_to_save = module_to_save[0]
+torch.save(module_to_save.state_dict(),
             os.path.join(checkpoint_dir, "encoder.pth"))
 
 if not os.path.exists(os.path.join(args.outdir, "pretrain_barlow", "setups.tsv")):

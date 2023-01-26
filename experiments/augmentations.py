@@ -6,14 +6,15 @@ from collections import namedtuple
 
 class Transformer(object):
     """ Class that can be used to register a sequence of transformations.
-    inspired from https://github.com/Duplums/yAwareContrastiveLearning/
+    Inspired from https://github.com/Duplums/yAwareContrastiveLearning/
     """
     Transform = namedtuple("Transform", ["transform", "probability"])
 
     def __init__(self, pipelines=None):
         """ Initialize the class.
         """
-        assert type(pipelines) is list and all([type(name) is str for name in pipelines])
+        assert (pipelines is None or (type(pipelines) is list and
+                    all([type(name) is str for name in pipelines])))
         self.transforms = []
         if pipelines is not None:
             self.transforms = {name: [] for name in pipelines}

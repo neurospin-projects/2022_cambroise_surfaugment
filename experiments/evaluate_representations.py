@@ -27,7 +27,7 @@ from torchvision.utils import make_grid
 from torchvision import transforms
 from torchvision.transforms import Compose, RandomCrop, RandomRotation, RandomApply, RandomResizedCrop, InterpolationMode, ToPILImage
 # from pl_bolts.models.autoencoders import VAE
-from surfify.models import SphericalVAE, SphericalGVAE, HemiFusionDecoder, HemiFusionEncoder
+from surfify.models import SphericalVAE, SphericalGVAE, HemiFusionDecoder, HemiFusionEncoder, SphericalHemiFusionEncoder
 from surfify.losses import SphericalVAELoss
 from surfify.utils import setup_logging, icosahedron, text2grid, grid2text, downsample_data, downsample
 from brainboard import Board
@@ -90,7 +90,6 @@ modalities = ["surface-lh", "surface-rh"]
 metrics = ["thickness", "curv", "sulc"]
 use_grid = args.conv == "SpMa"
 transform = None
-batch_size = 128
 
 input_size = 192
 limits_per_metric = {"curv": [-5, 5]}
@@ -154,8 +153,11 @@ else:
 
 
 def encoder_cp_from_barlow_cp(checkpoint):
+    name_to_check = "backbone"
+    if use_grid:
+        name_to_check = "backbone.0"
     checkpoint = {".".join(key.split(".")[2:]): value 
-                for key, value in checkpoint["model_state_dict"].items() if "backbone.0" in key}
+                for key, value in checkpoint["model_state_dict"].items() if name_to_check in key}
     return checkpoint
 
 def params_from_path(path):
@@ -186,7 +188,7 @@ if args.pretrained_setup != "None":
     args = params_from_path(pretrained_path)
     max_epoch = int(pretrained_path.split("_epochs")[0].split("_")[-1])
     if epoch != max_epoch:
-        pretrained_path = pretrained_path.replace("encoder.pth", "model_epoch_{}.pth".format(epoch))
+        pretrained_path = pretrained_path.replace("encoder.pth", "model_epoch_{}.pth".format(int(epoch)))
     checkpoint = torch.load(pretrained_path)
     if epoch != max_epoch:
         checkpoint = encoder_cp_from_barlow_cp(checkpoint)
@@ -246,9 +248,8 @@ dataset = DataManager(dataset=args.data, datasetdir=args.datadir,
                       overwrite=False, **kwargs)
 
 
-
 loader = torch.utils.data.DataLoader(
-    dataset["train"]["all"], batch_size=batch_size, num_workers=6, pin_memory=True,
+    dataset["train"]["all"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
     shuffle=True)
 
 class SoftBiner(object):
@@ -449,6 +450,7 @@ class SelectNthDim(nn.Module):
 
 print(input_size)
 print(args.latent_dim)
+conv_filters = [int(num) for num in args.conv_filters.split("-")]
 
 for fold in range(n_folds):
 
@@ -466,17 +468,27 @@ for fold in range(n_folds):
             dataset["test"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
             shuffle=True)
 
-    encoder = HemiFusionEncoder(n_features, input_size, args.latent_dim,
-                                fusion_level=args.fusion_level,
-                                conv_flts=[int(num) for num in args.conv_filters.split("-")],
-                                activation=args.activation,
-                                batch_norm=args.batch_norm,
-                                return_dist=False)
+    if use_grid:
+        encoder = HemiFusionEncoder(n_features, input_size, args.latent_dim,
+                                    fusion_level=args.fusion_level,
+                                    conv_flts=conv_filters,
+                                    activation=args.activation,
+                                    batch_norm=args.batch_norm,
+                                    return_dist=False)
+    else:
+        encoder = SphericalHemiFusionEncoder(
+            n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
+            conv_flts=conv_filters, activation=args.activation,
+            batch_norm=args.batch_norm, conv_mode=args.conv,
+            cachedir=os.path.join(args.outdir, "cached_ico_infos"))
 
     if checkpoint is not None:
+        # print(checkpoint)
+        # print(encoder.state_dict())
         encoder.load_state_dict(checkpoint)
-  
-    model = nn.Sequential(encoder, SelectNthDim(0))
+    
+    if use_grid:
+        encoder = nn.Sequential(encoder, SelectNthDim(0))
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
