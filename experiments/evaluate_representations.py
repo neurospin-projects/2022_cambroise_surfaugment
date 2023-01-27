@@ -153,10 +153,12 @@ else:
 
 
 def encoder_cp_from_barlow_cp(checkpoint):
+    idx_to_start_from = 1
     name_to_check = "backbone"
     if use_grid:
         name_to_check = "backbone.0"
-    checkpoint = {".".join(key.split(".")[2:]): value 
+        idx_to_start_from = 2
+    checkpoint = {".".join(key.split(".")[idx_to_start_from:]): value 
                 for key, value in checkpoint["model_state_dict"].items() if name_to_check in key}
     return checkpoint
 
@@ -491,7 +493,7 @@ for fold in range(n_folds):
         encoder = nn.Sequential(encoder, SelectNthDim(0))
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = model.to(device)
+    model = encoder.to(device)
 
     # print(model)
     # print("Number of trainable parameters : ",

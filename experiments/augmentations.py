@@ -129,7 +129,9 @@ class Normalize(object):
         self.eps=eps
 
     def __call__(self, arr):
-        return self.std * (arr - arr.mean(dim=tuple(range(1, len(arr.shape))), keepdim=True))/(arr.std(dim=tuple(range(1, len(arr.shape))), keepdim=True) + self.eps) + self.mean
+        return self.std * ((arr - arr.mean(
+            dim=tuple(range(1, len(arr.shape))), keepdim=True)) / (arr.std(
+                dim=tuple(range(1, len(arr.shape))), keepdim=True) + self.eps)  + self.mean)
 
 
 class Cutout(object):

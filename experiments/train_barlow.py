@@ -28,7 +28,7 @@ from torchvision.utils import make_grid
 from torchvision.transforms import Compose, RandomApply, ToPILImage
 from torchvision import transforms
 from surfify.models import HemiFusionEncoder, SphericalHemiFusionEncoder
-from surfify.augmentation import SphericalRandomCut
+from surfify.augmentation import SphericalRandomCut, SphericalBlur
 from surfify.losses import SphericalVAELoss
 from surfify.utils import setup_logging, icosahedron, text2grid, grid2text, downsample_data, downsample
 from brainboard import Board
@@ -326,11 +326,19 @@ for modality in modalities:
     if args.normalize:
         transformer.register(Normalize())
     if args.gaussian_blur_augment:
-        transformer.register(RescaleAsImage(metrics))
-        transformer.register(ToPILImage)
-        transformer.register(GaussianBlur(), pipeline="hard")
-        transformer.register(GaussianBlur(), probability=0.1, pipeline="soft")
-        transformer.register(transforms.ToTensor())
+        if use_grid:
+            # transformer.register(RescaleAsImage(metrics))
+            transformer.register(ToPILImage)
+            transformer.register(GaussianBlur(), pipeline="hard")
+            transformer.register(GaussianBlur(), probability=0.1, pipeline="soft")
+            transformer.register(transforms.ToTensor())
+        else:
+            ico = backbone.ico[args.ico_order]
+            tranform = SphericalBlur(
+                ico.vertices, ico.triangles, ico.neighbor_indices,
+                sigma=(0.1, 1))
+            transformer.register(transform, pipeline="hard")
+            transformer.register(transform, probability=0.1, pipeline="soft")
     if args.cutout:
         transform = Cutout(patch_size=np.ceil(np.array(input_shape)/4))
         if not use_grid:
