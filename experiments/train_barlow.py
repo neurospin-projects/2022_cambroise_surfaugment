@@ -334,7 +334,7 @@ for modality in modalities:
             transformer.register(transforms.ToTensor())
         else:
             ico = backbone.ico[args.ico_order]
-            tranform = SphericalBlur(
+            transform = SphericalBlur(
                 ico.vertices, ico.triangles, ico.neighbor_indices,
                 sigma=(0.1, 1))
             transformer.register(transform, pipeline="hard")
