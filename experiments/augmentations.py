@@ -292,17 +292,22 @@ class PermuteBeetweenModalities(object):
         new_mod2 = []
         min_corruption = 0.05
         for idx in range(len(mod1)):
-            n_channels, img_height, img_width = mod1[idx].shape
+            shape = mod1[idx].shape
+            n_channels = shape[0]
             new_data1 = mod1[idx]
             new_data2 = mod2[idx]
             if np.random.random() < self.p[idx]:
-                corruption_level = np.random.random() * (self.p_corrupt[idx] - min_corruption) + min_corruption
+                corruption_level = (np.random.random() * 
+                (self.p_corrupt[idx] - min_corruption) + min_corruption)
                 if self.across_channels:
-                    mask = np.random.binomial(1, corruption_level, (img_height, img_width))
+                    mask = np.random.binomial(
+                        1, corruption_level, np.prod(shape[1:]))
                     mask = np.repeat(mask[np.newaxis], n_channels, 0)
                 else:
-                    mask = np.random.binomial(1, corruption_level, (n_channels, img_height, img_width))
-
+                    mask = np.random.binomial(*
+                        1, corruption_level,
+                        (n_channels, np.prod(shape[1:])))
+                mask = mask.reshape(shape[1:])
                 # Corrupt samples
                 new_data1 = mod1[idx] * (1 - mask) + mod2[idx] * mask
                 new_data2 = mod2[idx] * (1 - mask) + mod1[idx] * mask
