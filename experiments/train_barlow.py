@@ -192,7 +192,8 @@ else:
         return np.swapaxes(downsampled_data, 1, 2)
 
 input_shape = ((grid_size, grid_size, len(metrics)) if use_grid else
-               (len(icosahedron(7)), len(metrics)))
+               (len(metrics), len(ico_verts)))
+print(input_shape)
 
 activation = "ReLU"
 n_features = len(metrics)
