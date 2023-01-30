@@ -307,7 +307,7 @@ class PermuteBeetweenModalities(object):
                     mask = np.random.binomial(*
                         1, corruption_level,
                         (n_channels, np.prod(shape[1:])))
-                mask = mask.reshape(shape[1:])
+                mask = mask.reshape(shape)
                 # Corrupt samples
                 new_data1 = mod1[idx] * (1 - mask) + mod2[idx] * mask
                 new_data2 = mod2[idx] * (1 - mask) + mod1[idx] * mask
