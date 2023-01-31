@@ -74,7 +74,7 @@ parser.add_argument(
     help="convolutional filters at each layer.")
 parser.add_argument(
     "--projector", default="256-512-512", type=str, metavar="F",
-    help="convolutional filters at each layer.")
+    help="projector linear layers.")
 parser.add_argument(
     "--fusion-level", default=1, type=int, metavar="W",
     help="the fusion level in the convolutional encoder and decoder.")

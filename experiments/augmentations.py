@@ -199,7 +199,8 @@ class Bootstrapping(object):
             batch_idx = batch_idx.tolist()
         new_data = []
         for idx, x in enumerate(batch_data):
-            n_samples, n_channels, img_height, img_width = x.shape
+            shape = x.shape
+            n_samples, n_channels = shape[:2]
             idx_to_permute = range(n_samples)
             if self.groups is not None:
                 idx_to_permute = [list(set(self.groups[sample_idx]).intersection(batch_idx)) for sample_idx in batch_idx]
@@ -211,12 +212,12 @@ class Bootstrapping(object):
                 p_change_selected_feature = 0.6
                 p_select_feature = corruption_level / p_change_selected_feature
                 
-                mask_features = np.random.binomial(1, p_select_feature, (img_height, img_width))
+                mask_features = np.random.binomial(1, p_select_feature, shape[2:])
                 selected_feature_idx = np.where(mask_features == 1)
           
                 masks = np.zeros_like(x)
                 if self.across_channels:
-                    restreined_masks = np.random.binomial(1, p_change_selected_feature, (n_samples, img_height, img_width))
+                    restreined_masks = np.random.binomial(1, p_change_selected_feature, (n_samples, *shape[2:]))
                     restreined_masks = np.repeat(restreined_masks[:, np.newaxis], n_channels, 1)
                 else:
                     restreined_masks = np.random.binomial(1, p_change_selected_feature, x.shape)
