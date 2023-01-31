@@ -238,7 +238,14 @@ class Bootstrapping(object):
                         x_bar[:, :, row, column] = x[new_idx, :, row, column]
                     else:
                         for channel in range(n_channels):
-                            new_idx = np.random.permutation(idx_to_permute)
+                            if self.groups is None:
+                                new_idx = np.random.permutation(idx_to_permute)
+                            else:
+                                new_idx = []
+                                for sample_idx in range(n_samples):
+                                    rand_idx = int(np.random.random()*len(idx_to_permute[sample_idx]))
+                                    new_idx.append(idx_to_permute_in_batch[sample_idx][rand_idx])
+                                new_idx = np.array(new_idx)
                             x_bar[:, channel, row, column] = x[new_idx, channel, row, column]
 
                 # Corrupt samples
