@@ -123,15 +123,17 @@ class Reshape(object):
 
 
 class Normalize(object):
-    def __init__(self, mean=0.0, std=1.0, eps=1e-8):
+    def __init__(self, mean=0.0, std=1.0, eps=1e-8, channel_dim=0):
         self.mean=mean
         self.std=std
         self.eps=eps
+        self.channel_dim = channel_dim
 
     def __call__(self, arr):
-        return self.std * ((arr - arr.mean(
-            dim=tuple(range(1, len(arr.shape))), keepdim=True)) / (arr.std(
-                dim=tuple(range(1, len(arr.shape))), keepdim=True) + self.eps)  + self.mean)
+        return self.std * ((arr - arr.mean(dim=tuple(range(
+            self.channel_dim + 1, len(arr.shape))), keepdim=True)) / (arr.std(
+                dim=tuple(range(self.channel_dim + 1, len(arr.shape))),
+                keepdim=True) + self.eps)  + self.mean)
 
 
 class Cutout(object):
@@ -178,7 +180,7 @@ class Cutout(object):
 
 class Bootstrapping(object):
     def __init__(self, p, p_corrupt, across_channels=True,
-                 groups=None, normalizer=Normalize()):
+                 groups=None, normalizer=Normalize(channel_dim=1)):
         self.p = p
         self.p_corrupt = p_corrupt
         self.across_channels = across_channels
@@ -236,6 +238,10 @@ class Bootstrapping(object):
                                 rand_idx = int(np.random.random()*len(idx_to_permute[sample_idx]))
                                 new_idx.append(idx_to_permute_in_batch[sample_idx][rand_idx])
                             new_idx = np.array(new_idx)
+                        print(indices.shape)
+                        print(x_bar.shape)
+                        print(x.shape)
+                        print(x[new_idx].shape)
                         x_bar[:, :, indices] = x[new_idx, :, indices]
                     else:
                         for channel in range(n_channels):
