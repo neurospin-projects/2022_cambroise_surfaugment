@@ -324,7 +324,7 @@ for modality in modalities:
     if use_grid:
         channels_to_switch = (2, 0, 1)
         transformer.register(Permute(channels_to_switch))
-    if args.normalize:
+    if normalize:
         transformer.register(Normalize())
     if args.gaussian_blur_augment:
         if use_grid:
@@ -361,7 +361,7 @@ for modality in modalities:
 # }
 
 if args.inter_modal_augment > 0:
-    normalizer = Normalize() if args.batch_augment == 0 else None
+    normalizer = Normalize() if args.batch_augment == 0 and normalize else None
     on_the_fly_inter_transform = PermuteBeetweenModalities(
         (1, 0.1), args.inter_modal_augment, ("surface-lh", "surface-rh"),
         normalizer)

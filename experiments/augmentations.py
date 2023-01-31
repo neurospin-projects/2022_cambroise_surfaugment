@@ -229,6 +229,8 @@ class Bootstrapping(object):
                 x_bar = torch.zeros_like(x)
                 for indices in zip(*selected_feature_idx):
                     # row, column = indices
+                    if len(indices) == 1:
+                        indices = indices[0]
                     if self.across_channels:
                         if self.groups is None:
                             new_idx = np.random.permutation(idx_to_permute)
@@ -238,11 +240,6 @@ class Bootstrapping(object):
                                 rand_idx = int(np.random.random()*len(idx_to_permute[sample_idx]))
                                 new_idx.append(idx_to_permute_in_batch[sample_idx][rand_idx])
                             new_idx = np.array(new_idx)
-                        print(len(indices))
-                        print(indices)
-                        print(x_bar.shape)
-                        print(x.shape)
-                        print(x[new_idx].shape)
                         x_bar[:, :, indices] = x[new_idx, :, indices]
                     else:
                         for channel in range(n_channels):
@@ -268,7 +265,7 @@ class Bootstrapping(object):
         return new_data
 
 class PermuteBeetweenModalities(object):
-    def __init__(self, p, p_corrupt, modalities, across_channels=True,
+    def __init__(self, p, p_corrupt, modalities, across_channels=False,
                  normalizer=Normalize()):
         self.p = p
         self.p_corrupt = p_corrupt
