@@ -239,7 +239,7 @@ class Bootstrapping(object):
                                 new_idx.append(idx_to_permute_in_batch[sample_idx][rand_idx])
                             new_idx = np.array(new_idx)
                         print(len(indices))
-                        print(len(indices[0]))
+                        print(indices)
                         print(x_bar.shape)
                         print(x.shape)
                         print(x[new_idx].shape)
