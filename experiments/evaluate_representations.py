@@ -132,7 +132,7 @@ if use_mlp:
     input_size = 2 * len(metrics) * len(icosahedron(7)[0])
 
 input_shape = ((input_size, input_size, len(metrics)) if use_grid else
-               (len(metrics, len(icosahedron(args.ico_order)[0])))
+               (len(metrics), len(icosahedron(args.ico_order)[0])))
 
 if use_grid:
     transform = {
