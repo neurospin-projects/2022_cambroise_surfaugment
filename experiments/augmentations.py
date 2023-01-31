@@ -222,11 +222,11 @@ class Bootstrapping(object):
                 else:
                     restreined_masks = np.random.binomial(1, p_change_selected_feature, x.shape)
 
-                masks[:, :, selected_feature_idx[0], selected_feature_idx[1]] = restreined_masks[:, :, selected_feature_idx[0], selected_feature_idx[1]]
+                masks[:, :, *selected_feature_idx] = restreined_masks[:, :, *selected_feature_idx]
                 
                 x_bar = torch.zeros_like(x)
                 for indices in zip(*selected_feature_idx):
-                    row, column = indices
+                    # row, column = indices
                     if self.across_channels:
                         if self.groups is None:
                             new_idx = np.random.permutation(idx_to_permute)
@@ -236,7 +236,7 @@ class Bootstrapping(object):
                                 rand_idx = int(np.random.random()*len(idx_to_permute[sample_idx]))
                                 new_idx.append(idx_to_permute_in_batch[sample_idx][rand_idx])
                             new_idx = np.array(new_idx)
-                        x_bar[:, :, row, column] = x[new_idx, :, row, column]
+                        x_bar[:, :, indices] = x[new_idx, :, indices]
                     else:
                         for channel in range(n_channels):
                             if self.groups is None:
@@ -247,7 +247,7 @@ class Bootstrapping(object):
                                     rand_idx = int(np.random.random()*len(idx_to_permute[sample_idx]))
                                     new_idx.append(idx_to_permute_in_batch[sample_idx][rand_idx])
                                 new_idx = np.array(new_idx)
-                            x_bar[:, channel, row, column] = x[new_idx, channel, row, column]
+                            x_bar[:, channel, indices] = x[new_idx, channel, indices]
 
                 # Corrupt samples
                 x_tilde = x * (1-masks) + x_bar * masks
