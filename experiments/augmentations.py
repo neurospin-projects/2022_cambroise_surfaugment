@@ -222,7 +222,7 @@ class Bootstrapping(object):
                 else:
                     restreined_masks = np.random.binomial(1, p_change_selected_feature, x.shape)
 
-                masks[:, :, *selected_feature_idx] = restreined_masks[:, :, *selected_feature_idx]
+                masks[:, :, selected_feature_idx] = restreined_masks[:, :, selected_feature_idx]
                 
                 x_bar = torch.zeros_like(x)
                 for indices in zip(*selected_feature_idx):
