@@ -316,7 +316,7 @@ class PermuteBeetweenModalities(object):
                         1, corruption_level, np.prod(shape[1:]))
                     mask = np.repeat(mask[np.newaxis], n_channels, 0)
                 else:
-                    mask = np.random.binomial(*
+                    mask = np.random.binomial(
                         1, corruption_level,
                         (n_channels, np.prod(shape[1:])))
                 mask = mask.reshape(shape)
