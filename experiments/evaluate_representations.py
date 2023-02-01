@@ -495,7 +495,7 @@ for fold in range(n_folds):
             cachedir=os.path.join(args.outdir, "cached_ico_infos"))
 
     if checkpoint is not None:
-        # print(checkpoint)
+        print(checkpoint)
         # print(encoder.state_dict())
         encoder.load_state_dict(checkpoint)
     
