@@ -197,7 +197,7 @@ if args.pretrained_setup != "None":
 else:
     args.n_features = len(metrics)
     args.fusion_level = 1
-    args.activation = "ReLu"
+    args.activation = "ReLU"
     args.standardize = True
     args.normalize = True
     args.batch_norm = False
