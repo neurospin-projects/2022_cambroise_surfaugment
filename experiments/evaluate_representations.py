@@ -66,7 +66,7 @@ parser.add_argument(
     help="the soft labels' gaussian's sigma when method is 'distribution'.")
 parser.add_argument(
     "--pretrained-setup", default="None",
-    help="the path to the pretrained encoder.")
+    help="the pretrained encoder's id.")
 parser.add_argument(
     "--setups-file", default="None",
     help="the path to the file linking the setups to the pretrained encoder's path.")
@@ -460,8 +460,6 @@ class SelectNthDim(nn.Module):
     def forward(self, x):
         return x[self.dim]
 
-print(input_size)
-print(args.latent_dim)
 conv_filters = [int(num) for num in args.conv_filters.split("-")]
 
 for fold in range(n_folds):
@@ -495,7 +493,7 @@ for fold in range(n_folds):
             cachedir=os.path.join(args.outdir, "cached_ico_infos"))
 
     if checkpoint is not None:
-        print(checkpoint)
+        # print(checkpoint)
         # print(encoder.state_dict())
         encoder.load_state_dict(checkpoint)
     
