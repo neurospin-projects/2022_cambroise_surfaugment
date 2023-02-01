@@ -194,6 +194,16 @@ if args.pretrained_setup != "None":
     checkpoint = torch.load(pretrained_path)
     if epoch != max_epoch:
         checkpoint = encoder_cp_from_barlow_cp(checkpoint)
+else:
+    args.n_features = len(metrics)
+    args.fusion_level = 1
+    args.activation = "ReLu"
+    args.standardize = True
+    args.normalize = True
+    args.batch_norm = False
+    args.conv_filters = "64-128-128-256-256"
+    args.latent_dim = 64
+    args.batch_size = 64
 
 on_the_fly_transform = None
 
@@ -435,7 +445,7 @@ for name in evaluation_against_real_metric.keys():
 
 run_name = ("deepint_evaluate_representations_to_predict_{}_{}_predict_via_{}"
             "_pretrained_{}").format(
-                args.data, args.to_predict, args.method,args.pretrained_setup)
+                args.data, args.to_predict, args.method, args.pretrained_setup)
 
 resdir = os.path.join(resdir, run_name)
 if not os.path.isdir(resdir):
