@@ -521,8 +521,8 @@ for epoch in range(start_epoch, args.epochs + 1):
 
     model.train()
     if epoch % args.print_freq == 0:
-        stats["loss"] /= len(loader)
-        stats["valid_loss"] /= len(valid_loader)
+        stats["loss"] /= len(dataset["train"])
+        stats["valid_loss"] /= len(dataset["test"])
         print(json.dumps(stats))
         print(json.dumps(stats), file=stats_file)
 

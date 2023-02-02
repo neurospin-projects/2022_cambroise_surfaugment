@@ -530,7 +530,6 @@ for modality in modalities:
             transformer.register(transform, pipeline="hard")
             transformer.register(transform, probability=0.1, pipeline="soft")
     if args.cutout:
-        print("Adding Cutout !")
         transform = Cutout(patch_size=np.ceil(np.array(input_shape)/4))
         if not use_grid:
             ico = backbone.ico[args.ico_order]
@@ -595,9 +594,15 @@ for fold in range(n_folds):
             conv_flts=conv_filters, activation=args.activation,
             batch_norm=args.batch_norm, conv_mode=args.conv,
             cachedir=os.path.join(args.outdir, "cached_ico_infos"))
+        other_encoder = SphericalHemiFusionEncoder(
+            n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
+            conv_flts=conv_filters, activation=args.activation,
+            batch_norm=args.batch_norm, conv_mode=args.conv,
+            cachedir=os.path.join(args.outdir, "cached_ico_infos"))
 
-    # if checkpoint is not None:
-        # encoder.load_state_dict(checkpoint)
+    if checkpoint is not None:
+        print("loading encoder")
+        encoder.load_state_dict(checkpoint)
     
     
     if use_grid:
@@ -606,15 +611,18 @@ for fold in range(n_folds):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = encoder.to(device)
     other_model = BarlowTwins(args, encoder).to(device)
+    other_other_model = BarlowTwins(args, other_encoder).to(device)
     other_cp = torch.load(pretrained_path.replace("encoder.pth", "barlow.pth"))
-    other_model.load_state_dict(other_cp)
+    other_other_model.load_state_dict(other_cp)
+    other_model.projector = other_other_model.projector
+    other_model.bn = other_other_model.bn
 
-    encoder = SphericalHemiFusionEncoder(
-            n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
-            conv_flts=conv_filters, activation=args.activation,
-            batch_norm=args.batch_norm, conv_mode=args.conv,
-            cachedir=os.path.join(args.outdir, "cached_ico_infos"))
-    other_model.backbone = encoder.to(device)
+    # encoder = SphericalHemiFusionEncoder(
+    #         n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
+    #         conv_flts=conv_filters, activation=args.activation,
+    #         batch_norm=args.batch_norm, conv_mode=args.conv,
+    #         cachedir=os.path.join(args.outdir, "cached_ico_infos")).to(device)
+    # other_model.backbone = encoder
     # print(model)
     # print("Number of trainable parameters : ",
     #     sum(p.numel() for p in model.parameters() if p.requires_grad))
