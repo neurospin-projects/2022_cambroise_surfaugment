@@ -451,6 +451,86 @@ resdir = os.path.join(resdir, run_name)
 if not os.path.isdir(resdir):
     os.makedirs(resdir)
 
+def off_diagonal(x):
+    # return a flattened view of the off-diagonal elements of a square matrix
+    n, m = x.shape
+    assert n == m
+    return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
+
+args.projector = "256-512-512"
+args.lambd = 0.0051
+class BarlowTwins(nn.Module):
+    def __init__(self, args, backbone):
+        super().__init__()
+        self.args = args
+        self.backbone = backbone
+
+        # projector
+        sizes = [args.latent_dim] + list(map(int, args.projector.split('-')))
+        layers = []
+        for i in range(len(sizes) - 2):
+            layers.append(nn.Linear(sizes[i], sizes[i + 1], bias=False))
+            layers.append(nn.BatchNorm1d(sizes[i + 1]))
+            layers.append(nn.ReLU(inplace=True))
+        layers.append(nn.Linear(sizes[-2], sizes[-1], bias=False))
+        self.projector = nn.Sequential(*layers)
+
+        # normalization layer for the representations z1 and z2
+        self.bn = nn.BatchNorm1d(sizes[-1], affine=False)
+
+    def forward(self, y1, y2):
+        z1 = self.projector(self.backbone(y1))
+        z2 = self.projector(self.backbone(y2))
+
+        # empirical cross-correlation matrix
+        c = self.bn(z1).T @ self.bn(z2)
+
+        # sum the cross-correlation matrix between all gpus
+        c.div_(z1.shape[0])
+
+        on_diag = torch.diagonal(c).add_(-1).pow_(2).sum()
+        off_diag = off_diagonal(c).pow_(2).sum()
+        loss = on_diag + self.args.lambd * off_diag
+        return loss
+
+on_the_fly_transform = dict()
+for modality in modalities:
+    transformer = Transformer(["hard", "soft"])
+    if args.standardize:
+        transformer.register(scalers[modality])
+    if use_grid:
+        channels_to_switch = (2, 0, 1)
+        transformer.register(Permute(channels_to_switch))
+    if args.normalize:
+        transformer.register(Normalize())
+    # if args.gaussian_blur_augment:
+    #     if use_grid:
+    #         # transformer.register(RescaleAsImage(metrics))
+    #         transformer.register(ToPILImage)
+    #         transformer.register(GaussianBlur(), pipeline="hard")
+    #         transformer.register(GaussianBlur(), probability=0.1, pipeline="soft")
+    #         transformer.register(transforms.ToTensor())
+    #     else:
+    #         ico = backbone.ico[args.ico_order]
+    #         transform = SphericalBlur(
+    #             ico.vertices, ico.triangles, None,
+    #             sigma=(0.1, 1))
+    #         transformer.register(transform, pipeline="hard")
+    #         transformer.register(transform, probability=0.1, pipeline="soft")
+    # if args.cutout:
+    #     transform = Cutout(patch_size=np.ceil(np.array(input_shape)/4))
+    #     if not use_grid:
+    #         ico = backbone.ico[args.ico_order]
+    #         # We want to set the maximum size size to barely 1/4 of the 
+    #         # vertices. Since at each order, the number of vertices is
+    #         # multiplied by 4, the neighborhood to be considered is of
+    #         # order input_order - 1
+    #         transform = SphericalRandomCut(
+    #             ico.vertices, ico.triangles, ico.neighbor_indices,
+    #             patch_size=args.ico_order - 1)
+    #     transformer.register(transform, pipeline="hard")
+    #     transformer.register(transform, probability=0.5, pipeline="soft")
+    on_the_fly_transform[modality] = transformer
 
 class SelectNthDim(nn.Module):
     def __init__(self, dim):
@@ -493,15 +573,17 @@ for fold in range(n_folds):
             cachedir=os.path.join(args.outdir, "cached_ico_infos"))
 
     if checkpoint is not None:
-        # print(checkpoint)
-        # print(encoder.state_dict())
         encoder.load_state_dict(checkpoint)
+    
     
     if use_grid:
         encoder = nn.Sequential(encoder, SelectNthDim(0))
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = encoder.to(device)
+    other_model = BarlowTwins(args, encoder).to(device)
+    other_cp = torch.load(pretrained_path.replace("encoder.pth", "barlow.pth"))
+    other_model.load_state_dict(other_cp)
 
     # print(model)
     # print("Number of trainable parameters : ",
@@ -511,6 +593,7 @@ for fold in range(n_folds):
     model.eval()
     latents = []
     transformed_ys = []
+    loss = 0
     for step, x in enumerate(train_loader):
         x, metadata, _ = x
         left_x = x["surface-lh"].float().to(device, non_blocking=True)
@@ -524,15 +607,16 @@ for fold in range(n_folds):
         with torch.no_grad():
             X = (left_x, right_x)
             latents.append(model(X).squeeze().detach().cpu().numpy())
-
+            loss = other_model(X, X)
+        loss += loss.item()
     y = np.concatenate(transformed_ys)
     X = np.concatenate(latents)
-    print(X.shape)
     regressor.fit(X, y)
 
     valid_latents = []
     valid_ys = []
     valid_transformed_ys = []
+    valid_loss = 0
     for step, x in enumerate(valid_loader):
         x, metadata, _ = x
         left_x = x["surface-lh"].float().to(device, non_blocking=True)
@@ -549,12 +633,15 @@ for fold in range(n_folds):
             if use_mlp:
                 X = torch.cat(X, dim=1).view((len(left_x), -1))
             valid_latents.append(model(X).squeeze().detach().cpu().numpy())
+            valid_loss = other_model(X, X)
+        valid_loss += valid_loss.item()
     
     X_valid = np.concatenate(valid_latents)
     y_valid = np.concatenate(valid_transformed_ys)
     real_y_valid = np.concatenate(valid_ys)
 
-    print(X_valid.shape)
+    print(loss)
+    print(valid_loss)
     y_hat = regressor.predict(X_valid)
 
     preds = out_to_pred_func(y_hat)
@@ -564,6 +651,7 @@ for fold in range(n_folds):
         all_metrics[name].append(metric(y_valid, preds))
     for name, metric in evaluation_against_real_metric.items():
         all_metrics[name].append(metric(real_y_valid, real_preds))
+    break
 
 average_metrics = {}
 std_metrics = {}

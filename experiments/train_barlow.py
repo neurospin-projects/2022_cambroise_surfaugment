@@ -392,7 +392,7 @@ def off_diagonal(x):
     return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
 
 class BarlowTwins(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args, backbone=backbone):
         super().__init__()
         self.args = args
         self.backbone = backbone
@@ -556,7 +556,9 @@ module_to_save = model.backbone
 if use_grid:
     module_to_save = module_to_save[0]
 torch.save(module_to_save.state_dict(),
-            os.path.join(checkpoint_dir, "encoder.pth"))
+           os.path.join(checkpoint_dir, "encoder.pth"))
+torch.save(model.state_dict(),
+           os.path.join(checkpoint_dir, "barlow.pth"))
 
 if not os.path.exists(os.path.join(args.outdir, "pretrain_barlow", "setups.tsv")):
     setups = pd.DataFrame.from_dict(dict(id=[], path=[], epoch=[]))
