@@ -203,7 +203,7 @@ else:
     args.batch_norm = False
     args.conv_filters = "64-128-128-256-256"
     args.latent_dim = 64
-    args.batch_size = 64
+args.batch_size = 64
 
 on_the_fly_transform = None
 
@@ -527,6 +527,7 @@ for fold in range(n_folds):
 
     y = np.concatenate(transformed_ys)
     X = np.concatenate(latents)
+    print(X.shape)
     regressor.fit(X, y)
 
     valid_latents = []
@@ -553,6 +554,7 @@ for fold in range(n_folds):
     y_valid = np.concatenate(valid_transformed_ys)
     real_y_valid = np.concatenate(valid_ys)
 
+    print(X_valid.shape)
     y_hat = regressor.predict(X_valid)
 
     preds = out_to_pred_func(y_hat)

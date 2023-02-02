@@ -336,7 +336,7 @@ for modality in modalities:
         else:
             ico = backbone.ico[args.ico_order]
             transform = SphericalBlur(
-                ico.vertices, ico.triangles, ico.neighbor_indices,
+                ico.vertices, ico.triangles, None,
                 sigma=(0.1, 1))
             transformer.register(transform, pipeline="hard")
             transformer.register(transform, probability=0.1, pipeline="soft")
