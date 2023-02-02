@@ -493,7 +493,7 @@ for epoch in range(start_epoch, args.epochs + 1):
         stats["loss"] += loss.item()
         stats["time"] = int(time.time() - start_time)
         stats["step"] = step
-    mean_loss = stats["loss"] / len(loader) if not np.isinf(stats["loss"]) else losses[epoch-args.start_epoch-1]
+    mean_loss = stats["loss"] / len(dataset["train"]) if not np.isinf(stats["loss"]) else losses[epoch-args.start_epoch-1]
 
     if use_board:
         board.update_plot("training loss", epoch, mean_loss)
@@ -514,7 +514,7 @@ for epoch in range(start_epoch, args.epochs + 1):
             
             stats["valid_loss"] += loss.item()
             stats["time"] = int(time.time() - start_time)
-    mean_loss = stats["valid_loss"] / len(valid_loader) if (stats["valid_loss"] / len(valid_loader)) < threshold_valid_loss or epoch == 1 else valid_losses[epoch-args.start_epoch-1]
+    mean_loss = stats["valid_loss"] / len(dataset["test"]) if (stats["valid_loss"] / len(valid_loader)) < threshold_valid_loss or epoch == 1 else valid_losses[epoch-args.start_epoch-1]
     if use_board:
         board.update_plot("validation loss", epoch, mean_loss)
     valid_losses.append(mean_loss)
@@ -551,6 +551,11 @@ plt.title("Loss during training")
 plt.xlabel("Epoch")
 plt.ylabel("Loss")
 plt.savefig(os.path.join(checkpoint_dir, "losses.pdf"))
+
+idx_epoch = epoch-args.start_epoch
+last_average_saved_valid_losses = np.mean(valid_losses[max((idx_epoch - args.save_freq + 1), 0):idx_epoch + 1])
+if last_average_saved_valid_losses < best_average_valid_loss:
+    best_saved_epoch = epoch
 
 module_to_save = model.backbone
 if use_grid:

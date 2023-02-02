@@ -30,10 +30,12 @@ from torchvision.transforms import Compose, RandomCrop, RandomRotation, RandomAp
 from surfify.models import SphericalVAE, SphericalGVAE, HemiFusionDecoder, HemiFusionEncoder, SphericalHemiFusionEncoder
 from surfify.losses import SphericalVAELoss
 from surfify.utils import setup_logging, icosahedron, text2grid, grid2text, downsample_data, downsample
+from surfify.augmentation import SphericalRandomCut, SphericalBlur
+
 from brainboard import Board
 
 from multimodaldatasets.datasets import DataManager, DataLoaderWithBatchAugmentation
-from augmentations import Permute, Normalize, Reshape, Transformer
+from augmentations import Permute, Normalize, Reshape, Transformer, Cutout, GaussianBlur
 import parse
 
 
@@ -203,7 +205,11 @@ else:
     args.batch_norm = False
     args.conv_filters = "64-128-128-256-256"
     args.latent_dim = 64
-args.batch_size = 64
+    args.gaussian_blur_augment = False
+    args.cutout = False
+args.batch_size = 32
+
+print(args)
 
 on_the_fly_transform = None
 
@@ -493,6 +499,12 @@ class BarlowTwins(nn.Module):
         loss = on_diag + self.args.lambd * off_diag
         return loss
 
+conv_filters = [int(num) for num in args.conv_filters.split("-")]
+backbone = SphericalHemiFusionEncoder(
+            n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
+            conv_flts=conv_filters, activation=args.activation,
+            batch_norm=args.batch_norm, conv_mode=args.conv,
+            cachedir=os.path.join(args.outdir, "cached_ico_infos"))
 on_the_fly_transform = dict()
 for modality in modalities:
     transformer = Transformer(["hard", "soft"])
@@ -503,34 +515,41 @@ for modality in modalities:
         transformer.register(Permute(channels_to_switch))
     if args.normalize:
         transformer.register(Normalize())
-    # if args.gaussian_blur_augment:
-    #     if use_grid:
-    #         # transformer.register(RescaleAsImage(metrics))
-    #         transformer.register(ToPILImage)
-    #         transformer.register(GaussianBlur(), pipeline="hard")
-    #         transformer.register(GaussianBlur(), probability=0.1, pipeline="soft")
-    #         transformer.register(transforms.ToTensor())
-    #     else:
-    #         ico = backbone.ico[args.ico_order]
-    #         transform = SphericalBlur(
-    #             ico.vertices, ico.triangles, None,
-    #             sigma=(0.1, 1))
-    #         transformer.register(transform, pipeline="hard")
-    #         transformer.register(transform, probability=0.1, pipeline="soft")
-    # if args.cutout:
-    #     transform = Cutout(patch_size=np.ceil(np.array(input_shape)/4))
-    #     if not use_grid:
-    #         ico = backbone.ico[args.ico_order]
-    #         # We want to set the maximum size size to barely 1/4 of the 
-    #         # vertices. Since at each order, the number of vertices is
-    #         # multiplied by 4, the neighborhood to be considered is of
-    #         # order input_order - 1
-    #         transform = SphericalRandomCut(
-    #             ico.vertices, ico.triangles, ico.neighbor_indices,
-    #             patch_size=args.ico_order - 1)
-    #     transformer.register(transform, pipeline="hard")
-    #     transformer.register(transform, probability=0.5, pipeline="soft")
+    if args.gaussian_blur_augment:
+        if use_grid:
+            # transformer.register(RescaleAsImage(metrics))
+            transformer.register(ToPILImage)
+            transformer.register(GaussianBlur(), pipeline="hard")
+            transformer.register(GaussianBlur(), probability=0.1, pipeline="soft")
+            transformer.register(transforms.ToTensor())
+        else:
+            ico = backbone.ico[args.ico_order]
+            transform = SphericalBlur(
+                ico.vertices, ico.triangles, None,
+                sigma=(0.1, 1))
+            transformer.register(transform, pipeline="hard")
+            transformer.register(transform, probability=0.1, pipeline="soft")
+    if args.cutout:
+        print("Adding Cutout !")
+        transform = Cutout(patch_size=np.ceil(np.array(input_shape)/4))
+        if not use_grid:
+            ico = backbone.ico[args.ico_order]
+            # We want to set the maximum size size to barely 1/4 of the 
+            # vertices. Since at each order, the number of vertices is
+            # multiplied by 4, the neighborhood to be considered is of
+            # order input_order - 1
+            transform = SphericalRandomCut(
+                ico.vertices, ico.triangles, ico.neighbor_indices,
+                patch_size=args.ico_order - 1)
+        transformer.register(transform, pipeline="hard")
+        transformer.register(transform, probability=0.5, pipeline="soft")
     on_the_fly_transform[modality] = transformer
+
+other_dataset = DataManager(dataset=args.data, datasetdir=args.datadir,
+    modalities=modalities, validation=n_folds,
+    stratify_on=["sex", "age"], discretize=["age"],
+    transform=transform, on_the_fly_transform=on_the_fly_transform,
+    overwrite=False, **kwargs)
 
 class SelectNthDim(nn.Module):
     def __init__(self, dim):
@@ -539,8 +558,6 @@ class SelectNthDim(nn.Module):
 
     def forward(self, x):
         return x[self.dim]
-
-conv_filters = [int(num) for num in args.conv_filters.split("-")]
 
 for fold in range(n_folds):
 
@@ -558,6 +575,13 @@ for fold in range(n_folds):
             dataset["test"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
             shuffle=True)
 
+        other_train_loader = torch.utils.data.DataLoader(
+            other_dataset["train"]["all"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
+            shuffle=True)
+        other_valid_loader = torch.utils.data.DataLoader(
+            other_dataset["test"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
+            shuffle=True)
+
     if use_grid:
         encoder = HemiFusionEncoder(n_features, input_size, args.latent_dim,
                                     fusion_level=args.fusion_level,
@@ -572,8 +596,8 @@ for fold in range(n_folds):
             batch_norm=args.batch_norm, conv_mode=args.conv,
             cachedir=os.path.join(args.outdir, "cached_ico_infos"))
 
-    if checkpoint is not None:
-        encoder.load_state_dict(checkpoint)
+    # if checkpoint is not None:
+        # encoder.load_state_dict(checkpoint)
     
     
     if use_grid:
@@ -585,15 +609,23 @@ for fold in range(n_folds):
     other_cp = torch.load(pretrained_path.replace("encoder.pth", "barlow.pth"))
     other_model.load_state_dict(other_cp)
 
+    encoder = SphericalHemiFusionEncoder(
+            n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
+            conv_flts=conv_filters, activation=args.activation,
+            batch_norm=args.batch_norm, conv_mode=args.conv,
+            cachedir=os.path.join(args.outdir, "cached_ico_infos"))
+    other_model.backbone = encoder.to(device)
     # print(model)
     # print("Number of trainable parameters : ",
     #     sum(p.numel() for p in model.parameters() if p.requires_grad))
 
     # Validation
     model.eval()
+    other_model.eval()
     latents = []
     transformed_ys = []
-    loss = 0
+    ys = []
+    full_loss = 0
     for step, x in enumerate(train_loader):
         x, metadata, _ = x
         left_x = x["surface-lh"].float().to(device, non_blocking=True)
@@ -604,19 +636,26 @@ for fold in range(n_folds):
             y = x["clinical"][:, index_to_predict]
         new_y = label_prepro.transform(np.array(y)[:, np.newaxis])
         transformed_ys.append(new_y)
-        with torch.no_grad():
+        ys.append(y)
+        with torch.cuda.amp.autocast():
             X = (left_x, right_x)
-            latents.append(model(X).squeeze().detach().cpu().numpy())
+            latents.append(other_model.backbone(X).squeeze().detach().cpu().numpy())
             loss = other_model(X, X)
-        loss += loss.item()
+        full_loss += loss.item()
     y = np.concatenate(transformed_ys)
+    real_y = np.concatenate(ys)
     X = np.concatenate(latents)
     regressor.fit(X, y)
+
+    y_hat = regressor.predict(X)
+    real_preds = out_to_real_pred_func(y_hat)
+    for name, metric in evaluation_against_real_metric.items():
+        print(name, metric(real_y, real_preds))
 
     valid_latents = []
     valid_ys = []
     valid_transformed_ys = []
-    valid_loss = 0
+    full_valid_loss = 0
     for step, x in enumerate(valid_loader):
         x, metadata, _ = x
         left_x = x["surface-lh"].float().to(device, non_blocking=True)
@@ -628,21 +667,50 @@ for fold in range(n_folds):
         new_y = label_prepro.transform(np.array(y)[:, np.newaxis])
         valid_ys.append(y)
         valid_transformed_ys.append(new_y)
-        with torch.no_grad():
+        with torch.cuda.amp.autocast():
             X = (left_x, right_x)
             if use_mlp:
                 X = torch.cat(X, dim=1).view((len(left_x), -1))
-            valid_latents.append(model(X).squeeze().detach().cpu().numpy())
+            valid_latents.append(other_model.backbone(X).squeeze().detach().cpu().numpy())
             valid_loss = other_model(X, X)
-        valid_loss += valid_loss.item()
+        full_valid_loss += valid_loss.item()
     
     X_valid = np.concatenate(valid_latents)
     y_valid = np.concatenate(valid_transformed_ys)
     real_y_valid = np.concatenate(valid_ys)
 
-    print(loss)
-    print(valid_loss)
+    print(full_loss / len(dataset["train"]["all"]))
+    print(full_valid_loss / len(dataset["test"]))
     y_hat = regressor.predict(X_valid)
+   
+    full_loss = 0
+    for step, x in enumerate(other_train_loader):
+        x, metadata, _ = x
+        left_x_1, left_x_2 = x["surface-lh"]
+        right_x_1, right_x_2 = x["surface-rh"]
+        left_x_1 = left_x_1.float().to(device)
+        left_x_2 = left_x_2.float().to(device)
+        right_x_1 = right_x_1.float().to(device)
+        right_x_2 = right_x_2.float().to(device)
+        with torch.cuda.amp.autocast():
+            loss = other_model((left_x_1, right_x_1), (left_x_2, right_x_2))
+        full_loss += loss.item()
+   
+    full_valid_loss = 0
+    for step, x in enumerate(other_valid_loader):
+        x, metadata, _ = x
+        left_x_1, left_x_2 = x["surface-lh"]
+        right_x_1, right_x_2 = x["surface-rh"]
+        left_x_1 = left_x_1.float().to(device)
+        left_x_2 = left_x_2.float().to(device)
+        right_x_1 = right_x_1.float().to(device)
+        right_x_2 = right_x_2.float().to(device)
+        with torch.cuda.amp.autocast():
+            valid_loss = other_model((left_x_1, right_x_1), (left_x_2, right_x_2))
+        full_valid_loss += valid_loss.item()
+
+    print(full_loss / len(dataset["train"]["all"]))
+    print(full_valid_loss / len(dataset["test"]))
 
     preds = out_to_pred_func(y_hat)
     real_preds = out_to_real_pred_func(y_hat)
@@ -652,7 +720,6 @@ for fold in range(n_folds):
     for name, metric in evaluation_against_real_metric.items():
         all_metrics[name].append(metric(real_y_valid, real_preds))
     break
-
 average_metrics = {}
 std_metrics = {}
 for metric in all_metrics.keys():
