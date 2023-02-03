@@ -122,7 +122,7 @@ args.conv_filters = [int(item) for item in args.conv_filters.split("-")]
 
 
 # Prepare process
-setup_logging(level="info", logfile=None)
+setup_logging(level="debug", logfile=None)
 checkpoint_dir = os.path.join(args.outdir, "pretrain_barlow", "checkpoints")
 if not os.path.isdir(checkpoint_dir):
     os.makedirs(checkpoint_dir)
@@ -335,23 +335,23 @@ for modality in modalities:
             transformer.register(transforms.ToTensor())
         else:
             ico = backbone.ico[args.ico_order]
-            transform = SphericalBlur(
+            trf = SphericalBlur(
                 ico.vertices, ico.triangles, None,
                 sigma=(0.1, 1))
-            transformer.register(transform, pipeline="hard")
-            transformer.register(transform, probability=0.1, pipeline="soft")
+            transformer.register(trf, pipeline="hard")
+            transformer.register(trf, probability=0.1, pipeline="soft")
     if args.cutout:
-        transform = Cutout(patch_size=np.ceil(np.array(input_shape)/4))
+        trf = Cutout(patch_size=np.ceil(np.array(input_shape)/4))
         if not use_grid:
             ico = backbone.ico[args.ico_order]
             t = time.time()
             path_size = min_order_to_get_n_neighbors(np.ceil(len(ico.vertices) / 4))
-            transform = SphericalRandomCut(
+            trf = SphericalRandomCut(
                 ico.vertices, ico.triangles, None,
                 patch_size=path_size)
             print(time.time() - t)
-        transformer.register(transform, pipeline="hard")
-        transformer.register(transform, probability=0.5, pipeline="soft")
+        transformer.register(trf, pipeline="hard")
+        transformer.register(trf, probability=0.5, pipeline="soft")
     on_the_fly_transform[modality] = transformer
 
 # on_the_fly_transform = {
