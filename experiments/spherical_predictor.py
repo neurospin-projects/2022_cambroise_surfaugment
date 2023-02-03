@@ -869,6 +869,7 @@ for fold in range(n_folds):
             n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
             conv_flts=args.conv_filters, activation=activation,
             batch_norm=args.batch_norm, conv_mode=args.conv,
+            dynamic_repa_zoom=True,
             cachedir=os.path.join(args.outdir, "cached_ico_infos"))
 
 

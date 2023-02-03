@@ -30,7 +30,7 @@ from torchvision import transforms
 from surfify.models import HemiFusionEncoder, SphericalHemiFusionEncoder
 from surfify.augmentation import SphericalRandomCut, SphericalBlur
 from surfify.losses import SphericalVAELoss
-from surfify.utils import setup_logging, icosahedron, text2grid, grid2text, downsample_data, downsample
+from surfify.utils import setup_logging, icosahedron, text2grid, grid2text, downsample_data, downsample, min_order_to_get_n_neighbors
 from brainboard import Board
 
 from multimodaldatasets.datasets import DataManager, DataLoaderWithBatchAugmentation
@@ -343,17 +343,13 @@ for modality in modalities:
     if args.cutout:
         transform = Cutout(patch_size=np.ceil(np.array(input_shape)/4))
         if not use_grid:
-            print(args.ico_order)
             ico = backbone.ico[args.ico_order]
-            print(len(ico.neighbor_indices))
-            print(len(ico.vertices))
-            # We want to set the maximum size size to barely 1/4 of the 
-            # vertices. Since at each order, the number of vertices is
-            # multiplied by 4, the neighborhood to be considered is of
-            # order input_order - 1
+            t = time.time()
+            path_size = min_order_to_get_n_neighbors(np.ceil(len(ico.vertices) / 4))
             transform = SphericalRandomCut(
-                ico.vertices, ico.triangles, ico.neighbor_indices,
-                patch_size=args.ico_order - 1)
+                ico.vertices, ico.triangles, None,ico.neighbor_indices,
+                patch_size=path_size)
+            print(time.time() - t)
         transformer.register(transform, pipeline="hard")
         transformer.register(transform, probability=0.5, pipeline="soft")
     on_the_fly_transform[modality] = transformer
