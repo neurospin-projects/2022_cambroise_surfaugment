@@ -347,7 +347,7 @@ for modality in modalities:
             t = time.time()
             path_size = min_order_to_get_n_neighbors(np.ceil(len(ico.vertices) / 4))
             transform = SphericalRandomCut(
-                ico.vertices, ico.triangles, None,ico.neighbor_indices,
+                ico.vertices, ico.triangles, None,
                 patch_size=path_size)
             print(time.time() - t)
         transformer.register(transform, pipeline="hard")
