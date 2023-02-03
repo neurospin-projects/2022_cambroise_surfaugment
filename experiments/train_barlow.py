@@ -343,7 +343,10 @@ for modality in modalities:
     if args.cutout:
         transform = Cutout(patch_size=np.ceil(np.array(input_shape)/4))
         if not use_grid:
+            print(args.ico_order)
             ico = backbone.ico[args.ico_order]
+            print(len(ico.neighbor_indices))
+            print(len(ico.vertices))
             # We want to set the maximum size size to barely 1/4 of the 
             # vertices. Since at each order, the number of vertices is
             # multiplied by 4, the neighborhood to be considered is of

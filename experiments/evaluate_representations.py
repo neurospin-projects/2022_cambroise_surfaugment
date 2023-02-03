@@ -201,7 +201,7 @@ else:
     args.fusion_level = 1
     args.activation = "ReLU"
     args.standardize = True
-    args.normalize = True
+    args.normalize = False
     args.batch_norm = False
     args.conv_filters = "64-128-128-256-256"
     args.latent_dim = 64
@@ -500,11 +500,12 @@ class BarlowTwins(nn.Module):
         return loss
 
 conv_filters = [int(num) for num in args.conv_filters.split("-")]
-backbone = SphericalHemiFusionEncoder(
-            n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
-            conv_flts=conv_filters, activation=args.activation,
-            batch_norm=args.batch_norm, conv_mode=args.conv,
-            cachedir=os.path.join(args.outdir, "cached_ico_infos"))
+if not use_grid:
+    backbone = SphericalHemiFusionEncoder(
+                n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
+                conv_flts=conv_filters, activation=args.activation,
+                batch_norm=args.batch_norm, conv_mode=args.conv,
+                cachedir=os.path.join(args.outdir, "cached_ico_infos"))
 on_the_fly_transform = dict()
 for modality in modalities:
     transformer = Transformer(["hard", "soft"])
@@ -594,11 +595,6 @@ for fold in range(n_folds):
             conv_flts=conv_filters, activation=args.activation,
             batch_norm=args.batch_norm, conv_mode=args.conv,
             cachedir=os.path.join(args.outdir, "cached_ico_infos"))
-        other_encoder = SphericalHemiFusionEncoder(
-            n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
-            conv_flts=conv_filters, activation=args.activation,
-            batch_norm=args.batch_norm, conv_mode=args.conv,
-            cachedir=os.path.join(args.outdir, "cached_ico_infos"))
 
     if checkpoint is not None:
         print("loading encoder")
@@ -611,11 +607,11 @@ for fold in range(n_folds):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = encoder.to(device)
     other_model = BarlowTwins(args, encoder).to(device)
-    other_other_model = BarlowTwins(args, other_encoder).to(device)
-    other_cp = torch.load(pretrained_path.replace("encoder.pth", "barlow.pth"))
-    other_other_model.load_state_dict(other_cp)
-    other_model.projector = other_other_model.projector
-    other_model.bn = other_other_model.bn
+    # other_other_model = BarlowTwins(args, other_encoder).to(device)
+    # other_cp = torch.load(pretrained_path.replace("encoder.pth", "barlow.pth"))
+    # other_other_model.load_state_dict(other_cp)
+    # other_model.projector = other_other_model.projector
+    # other_model.bn = other_other_model.bn
 
     # encoder = SphericalHemiFusionEncoder(
     #         n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
@@ -628,7 +624,7 @@ for fold in range(n_folds):
     #     sum(p.numel() for p in model.parameters() if p.requires_grad))
 
     # Validation
-    model.eval()
+    # model.eval()
     other_model.eval()
     latents = []
     transformed_ys = []
@@ -647,7 +643,7 @@ for fold in range(n_folds):
         ys.append(y)
         with torch.cuda.amp.autocast():
             X = (left_x, right_x)
-            latents.append(other_model.backbone(X).squeeze().detach().cpu().numpy())
+            latents.append(model(X).squeeze().detach().cpu().numpy())
             loss = other_model(X, X)
         full_loss += loss.item()
     y = np.concatenate(transformed_ys)
@@ -679,7 +675,7 @@ for fold in range(n_folds):
             X = (left_x, right_x)
             if use_mlp:
                 X = torch.cat(X, dim=1).view((len(left_x), -1))
-            valid_latents.append(other_model.backbone(X).squeeze().detach().cpu().numpy())
+            valid_latents.append(model(X).squeeze().detach().cpu().numpy())
             valid_loss = other_model(X, X)
         full_valid_loss += valid_loss.item()
     

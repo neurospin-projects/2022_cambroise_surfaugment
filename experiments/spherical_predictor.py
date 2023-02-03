@@ -3,9 +3,10 @@ import json
 import os
 import sys
 import time
-import pickle
+import parse
 import numpy as np
 from tqdm import tqdm
+import joblib
 import matplotlib
 from matplotlib import pyplot as plt
 from matplotlib import cm
@@ -27,13 +28,13 @@ from torchvision.utils import make_grid
 from torchvision import transforms
 from torchvision.transforms import Compose, RandomCrop, RandomRotation, RandomApply, RandomResizedCrop, InterpolationMode, ToPILImage
 # from pl_bolts.models.autoencoders import VAE
-from surfify.models import SphericalVAE, SphericalGVAE, HemiFusionDecoder, HemiFusionEncoder
+from surfify.models import SphericalVAE, SphericalGVAE, HemiFusionDecoder, HemiFusionEncoder, SphericalHemiFusionEncoder
 from surfify.losses import SphericalVAELoss
 from surfify.utils import setup_logging, icosahedron, text2grid, grid2text, downsample_data, downsample
 from brainboard import Board
 
 from multimodaldatasets.datasets import DataManager, DataLoaderWithBatchAugmentation
-from augmentations import Permute, Normalize, GaussianBlur, RescaleAsImage, PermuteBeetweenModalities, Bootstrapping
+from augmentations import Permute, Normalize, GaussianBlur, RescaleAsImage, PermuteBeetweenModalities, Bootstrapping, Reshape, Transformer
 
 
 # Get user parameters
@@ -44,11 +45,11 @@ parser.add_argument(
 parser.add_argument(
     "--datadir", metavar="DIR", help="data directory path.", required=True)
 parser.add_argument(
-    "--ico-order", default=7, type=int,
+    "--ico-order", default=6, type=int,
     help="the icosahedron order.")
-# parser.add_argument(
-#     "--conv", default="SpMa", choices=("DiNe", "RePa", "SpMa"),
-#     help="Wether or not to project on a 2d grid")
+parser.add_argument(
+    "--conv", default="DiNe", choices=("DiNe", "RePa", "SpMa"),
+    help="Wether or not to project on a 2d grid")
 parser.add_argument(
     "--epochs", default=100, type=int, metavar="N",
     help="number of total epochs to run.")
@@ -143,10 +144,10 @@ print(" ".join(sys.argv), file=stats_file)
 # Load the input cortical data
 modalities = ["surface-lh", "surface-rh"]
 metrics = ["thickness", "curv", "sulc"]
-use_grid = True#args.conv == "SpMa"
+use_grid = args.conv == "SpMa"
 transform = None
+grid_size = 192
 
-input_size = 192
 limits_per_metric = {"curv": [-5, 5]}
 def clip_values(textures, channel_dim=-1):
     metric_idx_to_clip = {key: metrics.index(key) for key in limits_per_metric}
@@ -157,7 +158,7 @@ def clip_values(textures, channel_dim=-1):
     return textures
 
 
-def transform_to_grid_wrapper(order=args.ico_order, grid_size=input_size, channel_dim=1,
+def transform_to_grid_wrapper(order=args.ico_order, grid_size=grid_size, channel_dim=1,
                               new_channel_dim=-1, standard_ico=False):
 
     vertices, triangles = icosahedron(order, standard_ico=standard_ico)
@@ -184,70 +185,117 @@ def composed_transform(textures):
 use_mlp = False
 if use_mlp:
     use_grid = False
-    input_size = 2 * len(metrics) * len(icosahedron(7)[0])
+    input_shape = 2 * len(metrics) * len(icosahedron(7)[0])
 
 if use_grid:
     transform = {
         "surface-lh": composed_transform,#transform_to_grid_wrapper(),
         "surface-rh": composed_transform,#transform_to_grid_wrapper(),
     }
-# else:
-    # order = 7
-    # ico_verts, _ = icosahedron(order)
-    # down_indices = []
-    # for low_order in range(order - 1, args.ico_order - 1, -1):
-    #     low_ico_verts, _ = icosahedron(low_order)
-    #     down_indices.append(downsample(ico_verts, low_ico_verts))
-    #     ico_verts = low_ico_verts
-    # def transform(x):
-    #     downsampled_data = downsample_data(x, 7 - args.ico_order, down_indices)
-    #     return np.swapaxes(downsampled_data, 1, 2)
+else:
+    order = 7
+    ico_verts, _ = icosahedron(order)
+    down_indices = []
+    for low_order in range(order - 1, args.ico_order - 1, -1):
+        low_ico_verts, _ = icosahedron(low_order)
+        down_indices.append(downsample(ico_verts, low_ico_verts))
+        ico_verts = low_ico_verts
+    def transform(x):
+        downsampled_data = downsample_data(x, 7 - args.ico_order, down_indices)
+        return np.swapaxes(downsampled_data, 1, 2)
+
+def encoder_cp_from_barlow_cp(checkpoint):
+    idx_to_start_from = 1
+    name_to_check = "backbone"
+    if use_grid:
+        name_to_check = "backbone.0"
+        idx_to_start_from = 2
+    checkpoint = {".".join(key.split(".")[idx_to_start_from:]): value 
+                for key, value in checkpoint["model_state_dict"].items() if name_to_check in key}
+    return checkpoint
+
+def params_from_path(path):
+    format = (
+        "deepint_barlow_{}_surf_{}_features_fusion_{}_act_{}_bn_{}_conv_{}"
+        "_latent_{}_wd_{}_{}_epochs_lr_{}_bs_{}_ba_{}_ima_{}_gba_{}_cutout_{}"
+        "_normalize_{}_standardize_{}")
+    parsed = parse.parse(format, path.split("/")[-2])
+    args_names = ["data_train", "n_features", "fusion_level", "activation",
+        "batch_norm", "conv_filters", "latent_dim",
+        "weight_decay", "epochs", "learning_rate", "batch_size",
+        "batch_augment", "inter_modal_augment", "gaussian_blur_augment",
+        "cutout", "normalize", "standardize"]
+    for idx, value in enumerate(parsed.fixed):
+        if value.isdigit():
+            value = float(value)
+            value = int(value) if int(value) == value else value
+        elif value in ["True", "False"]:
+            value = value == "True"
+        setattr(args, args_names[idx], value)
+    return args
+
+if args.pretrained_setup != "None":
+    assert args.setups_file != "None"
+    setups = pd.read_table(args.setups_file)
+    pretrained_path, epoch = setups[setups["id"] == int(args.pretrained_setup)][["path", "epoch"]].values[0]
+    args = params_from_path(pretrained_path)
+    max_epoch = int(pretrained_path.split("_epochs")[0].split("_")[-1])
+    if epoch != max_epoch:
+        pretrained_path = pretrained_path.replace("encoder.pth", "model_epoch_{}.pth".format(int(epoch)))
+    checkpoint = torch.load(pretrained_path)
+    if epoch != max_epoch:
+        checkpoint = encoder_cp_from_barlow_cp(checkpoint)
+else:
+    args.n_features = len(metrics)
+    args.fusion_level = 1
+    args.activation = "ReLU"
+    args.standardize = True
+    args.normalize = False
+    args.batch_norm = False
+    args.conv_filters = "64-128-128-256-256"
+    args.latent_dim = 64
+    args.gaussian_blur_augment = False
+    args.cutout = False
+
+input_shape = ((grid_size, grid_size, len(metrics)) if use_grid else
+               (len(metrics), len(ico_verts)))
+
+scaling = args.standardize
+scalers = {mod: None for mod in modalities}
+if scaling:
+    for modality in modalities:
+        path_to_scaler = os.path.join(args.datadir, f"{modality}_scaler.save")
+        scaler = joblib.load(path_to_scaler)
+        scalers[modality] =  transforms.Compose([
+            Reshape((1, -1)),
+            scaler.transform,
+            transforms.ToTensor(),
+            torch.squeeze,
+            Reshape(input_shape),
+        ])
+
+on_the_fly_transform = dict()
+for modality in modalities:
+    transformer = Transformer()
+    if args.standardize:
+        transformer.register(scalers[modality])
+    if use_grid:
+        channels_to_switch = (2, 0, 1)
+        transformer.register(Permute(channels_to_switch))
+    if args.normalize:
+        transformer.register(Normalize())
+    on_the_fly_transform[modality] = transformer
+
+# normalize = True
+# if args.inter_modal_augment > 0 or args.batch_augment > 0:
+#     normalize = False
 
 
-on_the_fly_transform = None
-
-
-class Transform:
-    def __init__(self, normalize=False):
-        channels_to_switch = (1, 0)
-        if use_grid:
-            channels_to_switch = (2, 0, 1)
-        self.transform = [
-            Permute(channels_to_switch),
-        ]
-        if args.gaussian_blur_augment > 0:
-            self.transform += [
-                RescaleAsImage(metrics),
-                ToPILImage(),
-                GaussianBlur(p=args.gaussian_blur_augment),
-                transforms.ToTensor(),
-            ]
-
-        if normalize:
-            self.transform += [
-                Normalize()
-            ]
-
-        self.transform = transforms.Compose(self.transform)
-
-    def __call__(self, x):
-        y = self.transform(x)
-        return y
-
-normalize = True
-if args.inter_modal_augment > 0 or args.batch_augment > 0:
-    normalize = False
-
-on_the_fly_transform = {
-    "surface-lh": Transform(normalize),
-    "surface-rh": Transform(normalize)
-}
-
-if args.inter_modal_augment > 0:
-    normalizer = Normalize() if args.batch_augment == 0 else None
-    on_the_fly_inter_transform = PermuteBeetweenModalities(
-        args.inter_modal_augment, 0.3, ("surface-lh", "surface-rh"),
-        normalizer)
+# if args.inter_modal_augment > 0:
+#     normalizer = Normalize() if args.batch_augment == 0 else None
+#     on_the_fly_inter_transform = PermuteBeetweenModalities(
+#         args.inter_modal_augment, 0.3, ("surface-lh", "surface-rh"),
+#         normalizer)
 
 batch_transforms = None
 batch_transforms_valid = None
@@ -263,15 +311,10 @@ kwargs = {
 }
 
 if args.data in ["hbn", "euaims"]:
-    kwargs["surface-lh"]["adjust_sites"] = False
-    kwargs["surface-lh"]["residualize_by"] = None
     kwargs["surface-lh"]["symetrized"] = True
 
-    kwargs["surface-rh"]["adjust_sites"] = False
-    kwargs["surface-rh"]["residualize_by"] = None
     kwargs["surface-rh"]["symetrized"] = True
 
-    kwargs["clinical"] = {"z_score": False}
     modalities.append("clinical")
 
 if args.data == "openbhb":
@@ -663,23 +706,6 @@ if linear_modeling:
 
     # for idx in range(Y.shape[1]):
     #     print(np.corrcoef(np.concatenate([Y[:, idx, np.newaxis], metadata[["asd"]].values], axis=1), rowvar=False)[0, 1])
-def encoder_cp_from_barlow_cp(checkpoint):
-    checkpoint = {".".join(key.split(".")[2:]): value 
-                for key, value in checkpoint["model_state_dict"].items() if "backbone.0" in key}
-    return checkpoint
-
-checkpoint = None
-if args.pretrained_setup != "None":
-    assert args.setups_file != "None"
-    setups = pd.read_table(args.setups_file)
-    pretrained_path, epoch = setups[setups["id"] == int(args.pretrained_setup)][["path", "epoch"]].values[0]
-    max_epoch = int(pretrained_path.split("_epochs")[0].split("_")[-1])
-    if epoch != max_epoch:
-        pretrained_path = pretrained_path.replace("encoder.pth", "model_epoch_{}.pth".format(epoch))
-    checkpoint = torch.load(pretrained_path)
-    if epoch != max_epoch:
-        checkpoint = encoder_cp_from_barlow_cp(checkpoint)
-
 
 # print(pretrained_path)
 
@@ -703,8 +729,8 @@ checkpoint_dir = os.path.join(checkpoint_dir, run_name)
 if not os.path.isdir(checkpoint_dir):
     os.makedirs(checkpoint_dir)
 
-use_board = True
-show_pbar = False
+use_board = False
+show_pbar = True
 
 class SelectNthDim(nn.Module):
     def __init__(self, dim):
@@ -722,88 +748,86 @@ class ConcatAlongDim(nn.Module):
     def forward(self, x):
         return torch.cat(x, dim=self.dim)
 
-print(input_size)
-print(args.latent_dim)
 
 for fold in range(n_folds):
     print("Training on fold {} / {}".format(fold + 1, n_folds))
-    if args.batch_augment > 0:
-        original_dataset = DataManager(
-            dataset=args.data, datasetdir=args.datadir,
-            modalities=modalities, transform=transform,
-            stratify_on=["sex", "age"], discretize=["age"],
-            overwrite=False, on_the_fly_transform=None,
-            on_the_fly_inter_transform=None,
-            validation=n_folds, **kwargs)
+    # if args.batch_augment > 0:
+    #     original_dataset = DataManager(
+    #         dataset=args.data, datasetdir=args.datadir,
+    #         modalities=modalities, transform=transform,
+    #         stratify_on=["sex", "age"], discretize=["age"],
+    #         overwrite=False, on_the_fly_transform=None,
+    #         on_the_fly_inter_transform=None,
+    #         validation=n_folds, **kwargs)
 
-        train_loader = torch.utils.data.DataLoader(
-            original_dataset["train"][fold]["train"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-            shuffle=True)
-        valid_loader = torch.utils.data.DataLoader(
-            original_dataset["train"][fold]["valid"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-            shuffle=True)
-        if args.evaluate:
-            train_loader = torch.utils.data.DataLoader(
-                original_dataset["train"]["all"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-                shuffle=True)
-            valid_loader = torch.utils.data.DataLoader(
-                original_dataset["test"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-                shuffle=True)
+    #     train_loader = torch.utils.data.DataLoader(
+    #         original_dataset["train"][fold]["train"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
+    #         shuffle=True)
+    #     valid_loader = torch.utils.data.DataLoader(
+    #         original_dataset["train"][fold]["valid"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
+    #         shuffle=True)
+    #     if args.evaluate:
+    #         train_loader = torch.utils.data.DataLoader(
+    #             original_dataset["train"]["all"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
+    #             shuffle=True)
+    #         valid_loader = torch.utils.data.DataLoader(
+    #             original_dataset["test"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
+    #             shuffle=True)
         
-        if args.batch_augment > 0:
-            groups = {}
-            groups_valid = {}
-            print("Initializing KNN...")
-            for modality in ["surface-lh", "surface-rh"]:
-                regressor = KNeighborsRegressor(n_neighbors=30)
-                X, Y = [], []
-                X_valid, Y_valid = [], []
-                for x in train_loader:
-                    x, metadata, _ = x
-                    X += x[modality].view((len(x[modality]), -1)).tolist()
-                    Y += metadata["age"].tolist()
+    #     if args.batch_augment > 0:
+    #         groups = {}
+    #         groups_valid = {}
+    #         print("Initializing KNN...")
+    #         for modality in ["surface-lh", "surface-rh"]:
+    #             regressor = KNeighborsRegressor(n_neighbors=30)
+    #             X, Y = [], []
+    #             X_valid, Y_valid = [], []
+    #             for x in train_loader:
+    #                 x, metadata, _ = x
+    #                 X += x[modality].view((len(x[modality]), -1)).tolist()
+    #                 Y += metadata["age"].tolist()
         
-                for x in valid_loader:
-                    x, metadata, _ = x
-                    X_valid += x[modality].view((len(x[modality]), -1)).tolist()
-                    Y_valid += metadata["age"].tolist()
+    #             for x in valid_loader:
+    #                 x, metadata, _ = x
+    #                 X_valid += x[modality].view((len(x[modality]), -1)).tolist()
+    #                 Y_valid += metadata["age"].tolist()
 
-                # print("Scaling")
-                scaler = StandardScaler()
-                X = scaler.fit_transform(X)
-                X_valid = scaler.transform(X_valid)
-                # print("Scaled")
+    #             # print("Scaling")
+    #             scaler = StandardScaler()
+    #             X = scaler.fit_transform(X)
+    #             X_valid = scaler.transform(X_valid)
+    #             # print("Scaled")
 
-                # print("Reducting")
-                reductor = PCA(30)
-                X = reductor.fit_transform(X)
-                X_valid = reductor.transform(X_valid)
-                # print("Reducted")
+    #             # print("Reducting")
+    #             reductor = PCA(30)
+    #             X = reductor.fit_transform(X)
+    #             X_valid = reductor.transform(X_valid)
+    #             # print("Reducted")
 
-                regressor.fit(X, Y)
-                print(mean_absolute_error(Y, regressor.predict(X)))
-                print(mean_absolute_error(Y_valid, regressor.predict(X_valid)))
-                print(r2_score(Y, regressor.predict(X)))
-                print(r2_score(Y_valid, regressor.predict(X_valid)))
-                _, neigh_idx = regressor.kneighbors(X)
-                _, neigh_idx_valid = regressor.kneighbors(X_valid)
-                groups[modality] = neigh_idx
-                groups_valid[modality] = neigh_idx_valid
-            # print("Groups built.")
+    #             regressor.fit(X, Y)
+    #             print(mean_absolute_error(Y, regressor.predict(X)))
+    #             print(mean_absolute_error(Y_valid, regressor.predict(X_valid)))
+    #             print(r2_score(Y, regressor.predict(X)))
+    #             print(r2_score(Y_valid, regressor.predict(X_valid)))
+    #             _, neigh_idx = regressor.kneighbors(X)
+    #             _, neigh_idx_valid = regressor.kneighbors(X_valid)
+    #             groups[modality] = neigh_idx
+    #             groups_valid[modality] = neigh_idx_valid
+    #         # print("Groups built.")
 
-            batch_transforms = {
-                "surface-lh": Bootstrapping(p=args.batch_augment, p_corrupt=0.3,
-                                            groups=groups["surface-lh"]),
-                "surface-rh": Bootstrapping(p=args.batch_augment, p_corrupt=0.3,
-                                            groups=groups["surface-rh"]),
-            }
+    #         batch_transforms = {
+    #             "surface-lh": Bootstrapping(p=args.batch_augment, p_corrupt=0.3,
+    #                                         groups=groups["surface-lh"]),
+    #             "surface-rh": Bootstrapping(p=args.batch_augment, p_corrupt=0.3,
+    #                                         groups=groups["surface-rh"]),
+    #         }
 
-            batch_transforms_valid = {
-                "surface-lh": Bootstrapping(p=args.batch_augment, p_corrupt=0.3,
-                                            groups=groups_valid["surface-lh"]),
-                "surface-rh": Bootstrapping(p=args.batch_augment, p_corrupt=0.3,
-                                            groups=groups_valid["surface-rh"]),
-            }
+    #         batch_transforms_valid = {
+    #             "surface-lh": Bootstrapping(p=args.batch_augment, p_corrupt=0.3,
+    #                                         groups=groups_valid["surface-lh"]),
+    #             "surface-rh": Bootstrapping(p=args.batch_augment, p_corrupt=0.3,
+    #                                         groups=groups_valid["surface-rh"]),
+    #         }
 
     train_loader = DataLoaderWithBatchAugmentation(batch_transforms,
         dataset["train"][fold]["train"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
@@ -828,18 +852,25 @@ for fold in range(n_folds):
             shuffle=True)
 
     if use_mlp:
-        modules = [nn.Linear(input_size, args.latent_dim)]
+        modules = [nn.Linear(grid_size, args.latent_dim)]
         if args.batch_norm:
             modules.append(nn.BatchNorm1d(args.latent_dim))
         modules.append(nn.ReLU())
         encoder = nn.Sequential(*modules)
-    else:
-        encoder = HemiFusionEncoder(n_features, input_size, args.latent_dim,
+    elif use_grid:
+        encoder = HemiFusionEncoder(n_features, grid_size, args.latent_dim,
                                 fusion_level=args.fusion_level,
                                 conv_flts=[int(num) for num in args.conv_filters.split("-")],
                                 activation=activation,
                                 batch_norm=args.batch_norm,
                                 return_dist=False)
+    else:
+        encoder = SphericalHemiFusionEncoder(
+            n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
+            conv_flts=args.conv_filters, activation=activation,
+            batch_norm=args.batch_norm, conv_mode=args.conv,
+            cachedir=os.path.join(args.outdir, "cached_ico_infos"))
+
 
     if checkpoint is not None:
         encoder.load_state_dict(checkpoint)
@@ -875,8 +906,9 @@ for fold in range(n_folds):
         output_activation
     ])
 
-    model = nn.Sequential(encoder, SelectNthDim(0), predictor)
-    if use_mlp:
+    if use_grid:
+        model = nn.Sequential(encoder, SelectNthDim(0), predictor)
+    else:
         model = nn.Sequential(encoder, predictor)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
