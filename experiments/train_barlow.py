@@ -30,7 +30,7 @@ from torchvision import transforms
 from surfify.models import HemiFusionEncoder, SphericalHemiFusionEncoder
 from surfify.augmentation import SphericalRandomCut, SphericalBlur
 from surfify.losses import SphericalVAELoss
-from surfify.utils import setup_logging, icosahedron, text2grid, grid2text, downsample_data, downsample, min_order_to_get_n_neighbors
+from surfify.utils import setup_logging, icosahedron, text2grid, grid2text, downsample_data, downsample, min_depth_to_get_n_neighbors
 from brainboard import Board
 
 from multimodaldatasets.datasets import DataManager, DataLoaderWithBatchAugmentation
@@ -337,7 +337,8 @@ for modality in modalities:
             ico = backbone.ico[args.ico_order]
             trf = SphericalBlur(
                 ico.vertices, ico.triangles, None,
-                sigma=(0.1, 1))
+                sigma=(0.1, 2),
+                cachedir=os.path.join(args.outdir, "cached_ico_infos"))
             transformer.register(trf, pipeline="hard")
             transformer.register(trf, probability=0.1, pipeline="soft")
     if args.cutout:
@@ -345,10 +346,11 @@ for modality in modalities:
         if not use_grid:
             ico = backbone.ico[args.ico_order]
             t = time.time()
-            path_size = min_order_to_get_n_neighbors(np.ceil(len(ico.vertices) / 4))
+            path_size = min_depth_to_get_n_neighbors(np.ceil(len(ico.vertices) / 4))
             trf = SphericalRandomCut(
                 ico.vertices, ico.triangles, None,
-                patch_size=path_size)
+                patch_size=path_size,
+                cachedir=os.path.join(args.outdir, "cached_ico_infos"))
             print(time.time() - t)
         transformer.register(trf, pipeline="hard")
         transformer.register(trf, probability=0.5, pipeline="soft")
