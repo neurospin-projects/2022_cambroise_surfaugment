@@ -58,7 +58,7 @@ class yAwareSimCLR(nn.Module):
         :param temperature:
         :param return_logits:
         """
-        self.args = args
+        super().__init__()
         self.backbone = backbone
         # projector
         sizes = [args.latent_dim] + list(map(int, args.projector.split('-')))
@@ -71,7 +71,6 @@ class yAwareSimCLR(nn.Module):
         self.projector = nn.Sequential(*layers)
 
         # sigma = prior over the label's range
-        super().__init__()
         self.kernel = "rbf"
         self.temperature = args.loss_param
         self.sigma = args.sigma

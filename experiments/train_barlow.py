@@ -43,10 +43,12 @@ parser.add_argument(
 parser.add_argument(
     "--batch-size", "-bs", default=128, type=int, metavar="N",
     help="mini-batch size.")
-parser.add_argument('--learning-rate', "-lr", default=1e-3, type=float,
-                    help='learning rate')
-parser.add_argument('--loss-param', default=0.0051, type=float, metavar='L',
-                    help='weight on off-diagonal terms')
+parser.add_argument(
+    '--learning-rate', "-lr", default=1e-3, type=float,
+    help='learning rate')
+parser.add_argument(
+    '--loss-param', default=0.0051, type=float, metavar='L',
+    help='weight on off-diagonal terms')
 parser.add_argument(
     "--weight-decay", default=1e-6, type=float, metavar="W",
     help="weight decay.")
@@ -169,7 +171,6 @@ def transform(x):
     return np.swapaxes(downsampled_data, 1, 2)
 
 input_shape = (len(metrics), len(ico_verts))
-print(input_shape)
 
 backbone = SphericalHemiFusionEncoder(
     n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
@@ -250,10 +251,10 @@ if args.batch_augment > 0 or args.standardize:
             print("Reducted")
 
             regressor.fit(X, Y)
-            print(mean_absolute_error(Y, regressor.predict(X)))
-            print(mean_absolute_error(Y_valid, regressor.predict(X_valid)))
-            print(r2_score(Y, regressor.predict(X)))
-            print(r2_score(Y_valid, regressor.predict(X_valid)))
+            # print(mean_absolute_error(Y, regressor.predict(X)))
+            # print(mean_absolute_error(Y_valid, regressor.predict(X_valid)))
+            # print(r2_score(Y, regressor.predict(X)))
+            # print(r2_score(Y_valid, regressor.predict(X_valid)))
             _, neigh_idx = regressor.kneighbors(X)
             _, neigh_idx_valid = regressor.kneighbors(X_valid)
             groups[modality] = neigh_idx
@@ -306,7 +307,7 @@ for modality in modalities:
             ico.vertices, ico.triangles, None,
             patch_size=path_size,
             cachedir=os.path.join(args.outdir, "cached_ico_infos"))
-        print(time.time() - t)
+        # print(time.time() - t)
         if args.algo == "barlow":
             transformer.register(trf, pipeline="hard")
             transformer.register(trf, probability=0.5, pipeline="soft")
@@ -336,8 +337,8 @@ valid_loader = DataLoaderWithBatchAugmentation(batch_transforms_valid,
     dataset["test"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
     shuffle=True)
 
-print(len(loader))
-print(len(valid_loader))
+# print(len(loader))
+# print(len(valid_loader))
 
 if args.algo == "barlow":
     model = BarlowTwins(args, backbone).to(device)
@@ -445,10 +446,9 @@ for epoch in range(start_epoch, args.epochs + 1):
         if epoch != args.start_epoch:
             idx_epoch = epoch-args.start_epoch
             last_average_saved_valid_losses = np.mean(valid_losses[(idx_epoch - args.save_freq + 1):idx_epoch + 1])
-            print(last_average_saved_valid_losses)
-            print(best_average_valid_loss)
             if last_average_saved_valid_losses < best_average_valid_loss:
                 best_saved_epoch = epoch
+                best_average_valid_loss = last_average_saved_valid_losses
                 setups.loc[setups["id"] == run_id, "best_epoch"] = best_saved_epoch
                 setups.to_csv(os.path.join(args.outdir, "pretrain", "setups.tsv"),
                     index=False, sep="\t")
