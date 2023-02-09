@@ -2,40 +2,21 @@ import argparse
 import json
 import os
 import sys
-import time
 import joblib
 import numpy as np
-from tqdm import tqdm
-import matplotlib
 from matplotlib import pyplot as plt
-from matplotlib import cm
-from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
-from sklearn.metrics import accuracy_score, recall_score, roc_auc_score, r2_score, mean_squared_error, mean_absolute_error
-from sklearn.preprocessing import KBinsDiscretizer, StandardScaler, RobustScaler, OrdinalEncoder
-from sklearn.linear_model import Ridge, ElasticNet, LogisticRegression
-from sklearn.neighbors import KNeighborsRegressor
-from sklearn.svm import SVC
-from scipy.stats import norm
+from sklearn.metrics import accuracy_score, r2_score, mean_squared_error, mean_absolute_error
+from sklearn.preprocessing import KBinsDiscretizer, StandardScaler, OrdinalEncoder
+from sklearn.linear_model import Ridge, LogisticRegression
 import pandas as pd
-from PIL import Image, ImageOps, ImageFilter
-import random
 import torch
 from torch import nn, optim
-from torch.distributions import Normal
-from torchvision.utils import make_grid
 from torchvision import transforms
-from torchvision.transforms import Compose, RandomCrop, RandomRotation, RandomApply, RandomResizedCrop, InterpolationMode, ToPILImage
-# from pl_bolts.models.autoencoders import VAE
-from surfify.models import SphericalVAE, SphericalGVAE, HemiFusionDecoder, HemiFusionEncoder, SphericalHemiFusionEncoder
-from surfify.losses import SphericalVAELoss
-from surfify.utils import setup_logging, icosahedron, text2grid, grid2text, downsample_data, downsample
-from surfify.augmentation import SphericalRandomCut, SphericalBlur
+from surfify.models import SphericalHemiFusionEncoder
+from surfify.utils import setup_logging, icosahedron, downsample_data, downsample
 
-from brainboard import Board
-
-from multimodaldatasets.datasets import DataManager, DataLoaderWithBatchAugmentation
-from augmentations import Permute, Normalize, Reshape, Transformer, Cutout, GaussianBlur
+from multimodaldatasets.datasets import DataManager
+from augmentations import Normalize, Reshape, Transformer
 import parse
 
 
@@ -47,12 +28,6 @@ parser.add_argument(
 parser.add_argument(
     "--datadir", metavar="DIR", help="data directory path.", required=True)
 parser.add_argument(
-    "--ico-order", default=6, type=int,
-    help="the icosahedron order.")
-parser.add_argument(
-    "--conv", default="DiNe", choices=("DiNe", "RePa", "SpMa"),
-    help="Wether or not to project on a 2d grid")
-parser.add_argument(
     "--outdir", metavar="DIR", help="output directory path.", required=True)
 parser.add_argument(
     "--to-predict", default="age",
@@ -60,12 +35,6 @@ parser.add_argument(
 parser.add_argument(
     "--method", default="regression", choices=("regression", "classification"),
     help="the prediction method.")
-parser.add_argument(
-    "--bin-step", default=1, type=int,
-    help="the size of a bin when method is 'distribution'.")
-parser.add_argument(
-    "--sigma", default=1, type=float,
-    help="the soft labels' gaussian's sigma when method is 'distribution'.")
 parser.add_argument(
     "--pretrained-setup", default="None",
     help="the pretrained encoder's id.")
@@ -76,7 +45,11 @@ parser.add_argument(
     "--evaluate", action="store_true",
     help="Uses the whole training set to train once, and evaluates on the hold-out test set."
 )
+parser.add_argument(
+    "--ico-order", default=6, type=int,
+    help="the icosahedron order.")
 args = parser.parse_args()
+args.conv = "DiNe"
 
 # Prepare process
 setup_logging(level="info", logfile=None)
@@ -90,91 +63,44 @@ print(" ".join(sys.argv), file=stats_file)
 # Load the input cortical data
 modalities = ["surface-lh", "surface-rh"]
 metrics = ["thickness", "curv", "sulc"]
-use_grid = args.conv == "SpMa"
 transform = None
 
-input_size = 192
-limits_per_metric = {"curv": [-5, 5]}
-def clip_values(textures, channel_dim=-1):
-    metric_idx_to_clip = {key: metrics.index(key) for key in limits_per_metric}
-    for key, idx in metric_idx_to_clip.items():
-        clipped_values = np.expand_dims(np.clip(np.take(textures, idx, axis=channel_dim), *limits_per_metric[key]), axis=channel_dim)
-        where = np.ones([1] * len(textures.shape), dtype=np.int64) * idx
-        np.put_along_axis(textures, where, clipped_values, axis=channel_dim)
-    return textures
-
-
-def transform_to_grid_wrapper(order=args.ico_order, grid_size=input_size, channel_dim=1,
-                              new_channel_dim=-1, standard_ico=False):
-
-    vertices, triangles = icosahedron(order, standard_ico=standard_ico)
-    new_channel_dim = new_channel_dim if new_channel_dim > 0 else 4 + new_channel_dim
-    def textures2grid(textures):
-        new_textures = []
-        for texture in textures:
-            new_texture = text2grid(vertices, np.take(texture, 0, axis=channel_dim))[np.newaxis, :]
-            for channel_idx in range(1, texture.shape[channel_dim]):
-                new_texture = np.concatenate((
-                    new_texture,
-                    [text2grid(vertices, np.take(texture, channel_idx, axis=channel_dim))]))
-            new_textures.append(new_texture)
-        new_order = list(range(len(new_texture.shape) + 1))
-        new_order.remove(1)
-        new_order.insert(new_channel_dim + 1, 1)
-        return np.asarray(new_textures).transpose(new_order)
-    return textures2grid
-
-def composed_transform(textures):
-    transform_to_grid = transform_to_grid_wrapper()
-    return clip_values(transform_to_grid(textures))
-
-use_mlp = False
-if use_mlp:
-    use_grid = False
-    input_size = 2 * len(metrics) * len(icosahedron(7)[0])
-
-input_shape = ((input_size, input_size, len(metrics)) if use_grid else
-               (len(metrics), len(icosahedron(args.ico_order)[0])))
-
-if use_grid:
-    transform = {
-        "surface-lh": composed_transform,#transform_to_grid_wrapper(),
-        "surface-rh": composed_transform,#transform_to_grid_wrapper(),
-    }
-else:
-    order = 7
-    ico_verts, _ = icosahedron(order)
-    down_indices = []
-    for low_order in range(order - 1, args.ico_order - 1, -1):
-        low_ico_verts, _ = icosahedron(low_order)
-        down_indices.append(downsample(ico_verts, low_ico_verts))
-        ico_verts = low_ico_verts
-    def transform(x):
-        downsampled_data = downsample_data(x, 7 - args.ico_order, down_indices)
-        return np.swapaxes(downsampled_data, 1, 2)
-
-
-def encoder_cp_from_barlow_cp(checkpoint):
-    idx_to_start_from = 1
+def encoder_cp_from_model_cp(checkpoint):
     name_to_check = "backbone"
-    if use_grid:
-        name_to_check = "backbone.0"
-        idx_to_start_from = 2
-    checkpoint = {".".join(key.split(".")[idx_to_start_from:]): value 
+    checkpoint = {".".join(key.split(".")[1:]): value 
                 for key, value in checkpoint["model_state_dict"].items() if name_to_check in key}
     return checkpoint
 
-def params_from_path(path):
-    format = (
+def params_from_args(params):
+    old_format = (
         "deepint_barlow_{}_surf_{}_features_fusion_{}_act_{}_bn_{}_conv_{}"
         "_latent_{}_wd_{}_{}_epochs_lr_{}_bs_{}_ba_{}_ima_{}_gba_{}_cutout_{}"
         "_normalize_{}_standardize_{}")
-    parsed = parse.parse(format, path.split("/")[-2])
-    args_names = ["data_train", "n_features", "fusion_level", "activation",
+    new_format = (
+        "pretrain_{}_on_{}_surf_order_{}_with_{}_features_fusion_{}_act_{}"
+        "_bn_{}_conv_{}_latent_{}_wd_{}_{}_epochs_lr_{}_reduced_{}_bs_{}_ba_{}"
+        "_ima_{}_blur_{}_noise_{}_cutout_{}_normalize_{}_standardize_{}_"
+        "loss_param_{}_sigma_{}")
+    old = True
+    try:
+        parsed = parse.parse(old_format, params.split("/")[-2])
+    except Exception:
+        old = False
+        parsed = parse.parse(new_format, params)
+    args_names = [
+        "data_train", "n_features", "fusion_level", "activation",
         "batch_norm", "conv_filters", "latent_dim",
         "weight_decay", "epochs", "learning_rate", "batch_size",
         "batch_augment", "inter_modal_augment", "gaussian_blur_augment",
         "cutout", "normalize", "standardize"]
+    if not old:
+        args_names = [
+            "algo", "data", "ico_order", "n_features", "fusion_level",
+            "activation", "batch_norm", "conv_filters",
+            "latent_dim", "weight_decay", "epochs", "learning_rate",
+            "reduce_lr", "batch_size", "batch_augment",
+            "inter_modal_augment", "blur", "noise", "cutout",
+            "normalize", "standardize", "loss_param", "sigma"]
     for idx, value in enumerate(parsed.fixed):
         if value.isdigit():
             value = float(value)
@@ -188,14 +114,21 @@ checkpoint = None
 if args.pretrained_setup != "None":
     assert args.setups_file != "None"
     setups = pd.read_table(args.setups_file)
-    pretrained_path, epoch = setups[setups["id"] == int(args.pretrained_setup)][["path", "epoch"]].values[0]
-    args = params_from_path(pretrained_path)
-    max_epoch = int(pretrained_path.split("_epochs")[0].split("_")[-1])
+    params, epoch = setups[setups["id"] == int(args.pretrained_setup)][["args", "best_epoch"]].values[0]
+    pretrained_path = os.path.join(
+            "/".join(args.setups_file.split("/")[:-1]),
+            "checkpoints", args.pretrained_setup,
+            "encoder.pth")
+    if int(args.pretrained_setup) < 10000:
+        pretrained_path = params
+    args = params_from_args(params)
+    max_epoch = int(params.split("_epochs")[0].split("_")[-1])
     if epoch != max_epoch:
-        pretrained_path = pretrained_path.replace("encoder.pth", "model_epoch_{}.pth".format(int(epoch)))
+        pretrained_path = pretrained_path.replace(
+            "encoder.pth", "model_epoch_{}.pth".format(int(epoch)))
     checkpoint = torch.load(pretrained_path)
     if epoch != max_epoch:
-        checkpoint = encoder_cp_from_barlow_cp(checkpoint)
+        checkpoint = encoder_cp_from_model_cp(checkpoint)
 else:
     args.n_features = len(metrics)
     args.fusion_level = 1
@@ -205,11 +138,31 @@ else:
     args.batch_norm = False
     args.conv_filters = "64-128-128-256-256"
     args.latent_dim = 64
-    args.gaussian_blur_augment = False
+    args.blur = False
     args.cutout = False
+    args.noise = False
+    args.ico_order = 6
 args.batch_size = 32
 
 print(args)
+
+use_mlp = False
+if use_mlp:
+    input_size = 2 * len(metrics) * len(icosahedron(args.ico_order)[0])
+
+input_shape = (len(metrics), len(icosahedron(args.ico_order)[0]))
+
+order = 7
+ico_verts, _ = icosahedron(order)
+down_indices = []
+for low_order in range(order - 1, args.ico_order - 1, -1):
+    low_ico_verts, _ = icosahedron(low_order)
+    down_indices.append(downsample(ico_verts, low_ico_verts))
+    ico_verts = low_ico_verts
+def transform(x):
+    downsampled_data = downsample_data(x, 7 - args.ico_order, down_indices)
+    return np.swapaxes(downsampled_data, 1, 2)
+
 
 on_the_fly_transform = None
 
@@ -232,9 +185,6 @@ for modality in modalities:
     transformer = Transformer()
     if args.standardize:
         transformer.register(scalers[modality])
-    if use_grid:
-        channels_to_switch = (2, 0, 1)
-        transformer.register(Permute(channels_to_switch))
     if args.normalize:
         transformer.register(Normalize())
     on_the_fly_transform[modality] = transformer
@@ -261,7 +211,7 @@ n_folds = 5
 
 dataset = DataManager(dataset=args.data, datasetdir=args.datadir,
                       modalities=modalities, validation=n_folds,
-                      stratify_on=["sex", "age"], discretize=["age"],
+                      stratify_on=["sex", "age", "site"], discretize=["age"],
                       transform=transform, on_the_fly_transform=on_the_fly_transform,
                       overwrite=False, **kwargs)
 
@@ -269,70 +219,6 @@ dataset = DataManager(dataset=args.data, datasetdir=args.datadir,
 loader = torch.utils.data.DataLoader(
     dataset["train"]["all"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
     shuffle=True)
-
-class SoftBiner(object):
-    def __init__(self, bin_step, sigma):
-        super().__init__()
-        self.sigma = sigma
-        self.bin_step = bin_step
-    
-    def fit(self, x):
-        self.bin_start = np.floor(x.min())
-        self.bin_end = np.ceil(x.max())
-        bin_length = self.bin_end - self.bin_start
-        if not bin_length % self.bin_step == 0:
-            print("bin's range should be divisible by bin_step!")
-            return -1
-        bin_number = int(bin_length / self.bin_step)
-        self.bin_centers = self.bin_start + self.bin_step / 2 + self.bin_step * np.arange(bin_number)
-
-
-    def transform(self, x):
-        if x.ndim > 1:
-            x = x.squeeze()
-        if self.sigma == 0:
-            i = np.floor((np.array(x) - self.bin_start) / self.bin_step)
-            i = i.astype(int)
-            return i
-        elif self.sigma > 0:
-            v = np.zeros((len(x), len(self.bin_centers)))
-            for j in range(len(x)):
-                for i in range(len(self.bin_centers)):
-                    x1 = self.bin_centers[i] - self.bin_step / 2
-                    x2 = self.bin_centers[i] + self.bin_step / 2
-                    cdfs = norm.cdf([x1, x2], loc=x[j], scale=self.sigma)
-                    v[j, i] = cdfs[1] - cdfs[0]
-            return v
-
-    def fit_transform(self, x):
-        self.fit(x)
-        return self.transform(x)
-
-class DifferentiableRound(nn.Module):
-    def __init__(self, scale):
-        super().__init__()
-        self.scale = scale[0]
-
-    def forward(self, x):
-        # print(type(x))
-        # print(type(self.scale))
-        # print(type(torch.pi))
-        # print(type(x - torch.sin(2 * torch.pi * x * self.scale) / (2 * torch.pi * self.scale)))
-        return (x - torch.sin(2 * torch.pi * x * self.scale) / (2 * torch.pi * self.scale)).float()
-
-
-def my_KLDivLoss(x, y):
-    """Returns K-L Divergence loss
-    Different from the default PyTorch nn.KLDivLoss in that
-    a) the result is averaged by the 0th dimension (Batch size)
-    b) the y distribution is added with a small value (1e-16) to prevent log(0) problem
-    """
-    loss_func = nn.KLDivLoss(reduction='sum')
-    y += 1e-16
-    n = y.shape[0]
-    loss = loss_func(x, y) / n
-    #print(loss)
-    return loss
 
 class TransparentProcessor(object):
     def __init__(self):
@@ -354,8 +240,6 @@ if "clinical" in modalities:
 
 for data in loader:
     data, metadata, _ = data
-    # surface_lh = data["surface-lh"][0].detach().numpy()
-    # surface_rh = data["surface-rh"][0].detach().numpy()
     if args.to_predict in metadata.keys():
         all_label_data.append(metadata[args.to_predict])
     else:
@@ -364,34 +248,6 @@ for data in loader:
 all_label_data = np.concatenate(all_label_data)
 label_values = np.unique(all_label_data)
 # plt.hist(all_label_data)
-
-# all_label_data_valid = []
-# for data in valid_loader:
-#     all_label_data_valid.append(metadata[args.to_predict])
-# all_label_data_valid = np.concatenate(all_label_data_valid)
-# label_values_valid = np.unique(all_label_data_valid)
-# plt.hist(all_label_data_valid)
-
-# from nilearn import plotting
-# from surfify.utils import icosahedron
-
-# ico = icosahedron(order=args.ico_order)
-# # for i in range(surface_lh.shape[-1]):
-# i = 0
-# plotting.plot_surf(ico, surface_lh[:, i])
-# plotting.plot_surf(ico, surface_rh[:, i])
-
-# print(other_other_mesh.coordinates.shape)
-# print(other_other_mesh.faces.shape)
-
-# plotting.plot_surf_roi(fsaverage["sphere_left"], roi_map=destrieux_atlas["map_left"], hemi="left",
-#                        view="lateral", bg_map=fsaverage["sulc_left"], bg_on_data=True, darkness=0.2)
-
-# plotting.plot_surf_roi(fsaverage["pial_left"], roi_map=destrieux_atlas["map_left"], hemi="left",
-#                        view="lateral", bg_map=fsaverage["sulc_left"], bg_on_data=True, darkness=0.2)
-# plotting.show()
-
-# plt.show()
 
 def corr_metric(y_true, y_pred):
     mat = np.concatenate([y_true[:, np.newaxis], y_pred[:, np.newaxis]], axis=1)
@@ -410,7 +266,6 @@ if args.method == "regression":
     
     label_prepro = StandardScaler()
     label_prepro.fit(all_label_data[:, np.newaxis])
-    # output_activation = DifferentiableRound(label_prepro.scale_)
     
     evaluation_metrics = {"rmse": root_mean_squared_error, "mae": mean_absolute_error}
     regressor = Ridge()
@@ -456,14 +311,6 @@ if not os.path.isdir(resdir):
 
 conv_filters = [int(num) for num in args.conv_filters.split("-")]
 
-class SelectNthDim(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.dim = dim
-
-    def forward(self, x):
-        return x[self.dim]
-
 for fold in range(n_folds):
 
     train_loader = torch.utils.data.DataLoader(
@@ -480,27 +327,16 @@ for fold in range(n_folds):
             dataset["test"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
             shuffle=True)
 
-    if use_grid:
-        encoder = HemiFusionEncoder(n_features, input_size, args.latent_dim,
-                                    fusion_level=args.fusion_level,
-                                    conv_flts=conv_filters,
-                                    activation=args.activation,
-                                    batch_norm=args.batch_norm,
-                                    return_dist=False)
-    else:
-        encoder = SphericalHemiFusionEncoder(
-            n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
-            conv_flts=conv_filters, activation=args.activation,
-            batch_norm=args.batch_norm, conv_mode=args.conv,
-            cachedir=os.path.join(args.outdir, "cached_ico_infos"))
+    encoder = SphericalHemiFusionEncoder(
+        n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
+        conv_flts=conv_filters, activation=args.activation,
+        batch_norm=args.batch_norm, conv_mode=args.conv,
+        cachedir=os.path.join(args.outdir, "cached_ico_infos"))
 
     if checkpoint is not None:
         print("loading encoder")
         encoder.load_state_dict(checkpoint)
-    
-    
-    if use_grid:
-        encoder = nn.Sequential(encoder, SelectNthDim(0))
+ 
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = encoder.to(device)

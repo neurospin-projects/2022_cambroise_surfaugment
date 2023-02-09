@@ -5,36 +5,24 @@ import sys
 import time
 import joblib
 import numpy as np
-from tqdm import tqdm
-import itertools
-import matplotlib
 from matplotlib import pyplot as plt
-from matplotlib import cm
 from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
-from sklearn.metrics import accuracy_score, recall_score, roc_auc_score, r2_score, mean_squared_error, mean_absolute_error
-from sklearn.preprocessing import KBinsDiscretizer, StandardScaler, RobustScaler
-from sklearn.linear_model import Ridge, ElasticNet, LogisticRegression
+from sklearn.metrics import r2_score, mean_absolute_error
+from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsRegressor
-from sklearn.svm import SVC
-from scipy.stats import norm
 import pandas as pd
-import random
 
 import torch
 from torch import nn, optim
-from torch.distributions import Normal
-from torchvision.utils import make_grid
-from torchvision.transforms import Compose, RandomApply, ToPILImage
 from torchvision import transforms
-from surfify.models import HemiFusionEncoder, SphericalHemiFusionEncoder
-from surfify.augmentation import SphericalRandomCut, SphericalBlur
-from surfify.losses import SphericalVAELoss
-from surfify.utils import setup_logging, icosahedron, text2grid, grid2text, downsample_data, downsample, min_depth_to_get_n_neighbors
+from surfify.models import SphericalHemiFusionEncoder
+from surfify.augmentation import SphericalRandomCut, SphericalBlur, SphericalNoise
+from surfify.utils import setup_logging, icosahedron, downsample_data, downsample, min_depth_to_get_n_neighbors
 from brainboard import Board
 
 from multimodaldatasets.datasets import DataManager, DataLoaderWithBatchAugmentation
-from augmentations import Permute, RescaleAsImage, Normalize, GaussianBlur, PermuteBeetweenModalities, Bootstrapping, Reshape, Cutout, Transformer
+from augmentations import Normalize, PermuteBeetweenModalities, Bootstrapping, Reshape, Transformer
+from models import BarlowTwins, yAwareSimCLR
 
 
 parser = argparse.ArgumentParser(description="Train Barlow Twins")
@@ -47,9 +35,6 @@ parser.add_argument(
     "--ico-order", default=6, type=int,
     help="the icosahedron order.")
 parser.add_argument(
-    "--conv", default="DiNe", choices=("DiNe", "RePa", "SpMa"),
-    help="Wether or not to project on a 2d grid")
-parser.add_argument(
     "--epochs", default=100, type=int, metavar="N",
     help="number of total epochs to run.")
 parser.add_argument(
@@ -58,13 +43,9 @@ parser.add_argument(
 parser.add_argument(
     "--batch-size", "-bs", default=128, type=int, metavar="N",
     help="mini-batch size.")
-# parser.add_argument('--learning-rate-weights', default=0.2, type=float, metavar='LR',
-#                     help='base learning rate for weights')
-# parser.add_argument('--learning-rate-biases', default=0.0048, type=float, metavar='LR',
-#                     help='base learning rate for biases and batch norm parameters')
 parser.add_argument('--learning-rate', "-lr", default=1e-3, type=float,
                     help='learning rate')
-parser.add_argument('--lambd', default=0.0051, type=float, metavar='L',
+parser.add_argument('--loss-param', default=0.0051, type=float, metavar='L',
                     help='weight on off-diagonal terms')
 parser.add_argument(
     "--weight-decay", default=1e-6, type=float, metavar="W",
@@ -99,8 +80,11 @@ parser.add_argument(
     "--inter-modal-augment", "-ima", default=0.0, type=float,
     help="optionnally uses inter modality augment.")
 parser.add_argument(
-    "--gaussian-blur-augment", "-gba", action="store_true",
+    "--blur", action="store_true",
     help="optionnally uses gaussian blur augment.")
+parser.add_argument(
+    "--noise", action="store_true",
+    help="optionnally uses noise augment.")
 parser.add_argument(
     "--cutout", action="store_true",
     help="optionnally uses cut out augment.")
@@ -114,112 +98,84 @@ parser.add_argument(
 parser.add_argument(
     "--reduce-lr", action="store_true",
     help="optionnally reduces the learning rate during training.")
+parser.add_argument(
+    "--sigma", default=0.0, type=float,
+    help="y-aware sigma parameter.")
+parser.add_argument(
+    "--algo", default="barlow", choices=("barlow", "simCLR"),
+    help="the self-supervised algo.")
 
 args = parser.parse_args()
 device = "cuda" if torch.cuda.is_available() else "cpu"
 args.ngpus_per_node = torch.cuda.device_count()
 args.conv_filters = [int(item) for item in args.conv_filters.split("-")]
-
-
-# Prepare process
-setup_logging(level="info", logfile=None)
-checkpoint_dir = os.path.join(args.outdir, "pretrain_barlow", "checkpoints")
-if not os.path.isdir(checkpoint_dir):
-    os.makedirs(checkpoint_dir)
-stats_file = open(os.path.join(checkpoint_dir, "stats.txt"), "a", buffering=1)
-print(" ".join(sys.argv))
-print(" ".join(sys.argv), file=stats_file)
+args.conv = "DiNe"
 
 # Load the input cortical data
 modalities = ["surface-lh", "surface-rh"]
 metrics = ["thickness", "curv", "sulc"]
-use_grid = args.conv == "SpMa"
 transform = None
 on_the_fly_transform = None
 batch_transforms = None
 batch_transforms_valid = None
 on_the_fly_inter_transform = None
 overwrite = False
+n_features = len(metrics)
+activation = "ReLU"
 
-grid_size = 192
-limits_per_metric = {"curv": [-5, 5]}
-def clip_values(textures, channel_dim=-1):
-    metric_idx_to_clip = {key: metrics.index(key) for key in limits_per_metric}
-    for key, idx in metric_idx_to_clip.items():
-        clipped_values = np.expand_dims(np.clip(np.take(textures, idx, axis=channel_dim), *limits_per_metric[key]), axis=channel_dim)
-        where = np.ones([1] * len(textures.shape), dtype=np.int64) * idx
-        np.put_along_axis(textures, where, clipped_values, axis=channel_dim)
-    return textures
+params = ("pretrain_{}_on_{}_surf_order_{}_with_{}_features_fusion_{}_act_{}"
+    "_bn_{}_conv_{}_latent_{}_wd_{}_{}_epochs_lr_{}_reduced_{}_bs_{}_ba_{}_ima"
+    "_{}_blur_{}_noise_{}_cutout_{}_normalize_{}_standardize_{}_loss_param_{}_"
+    "sigma_{}").format(
+        args.algo, args.data, args.ico_order, n_features, args.fusion_level,
+        activation, args.batch_norm, "-".join([str(s) for s in args.conv_filters]),
+        args.latent_dim, args.weight_decay, args.epochs, args.learning_rate,
+        args.reduce_lr, args.batch_size, args.batch_augment,
+        args.inter_modal_augment, args.blur, args.noise, args.cutout,
+        args.normalize, args.standardize, args.loss_param, args.sigma)
 
-def transform_to_grid_wrapper(order=args.ico_order, grid_size=grid_size,
-                              channel_dim=1, new_channel_dim=-1, standard_ico=False):
+# Prepare process
+setup_logging(level="info", logfile=None)
+checkpoint_dir = os.path.join(args.outdir, "pretrain", "checkpoints")
+if not os.path.isdir(checkpoint_dir):
+    os.makedirs(checkpoint_dir)
+stats_file = open(os.path.join(checkpoint_dir, "stats.txt"), "a", buffering=1)
+print(" ".join(sys.argv))
+print(" ".join(sys.argv), file=stats_file)
 
-    vertices, triangles = icosahedron(order, standard_ico=standard_ico)
-    new_channel_dim = new_channel_dim if new_channel_dim > 0 else 4 + new_channel_dim
-    def textures2grid(textures):
-        new_textures = []
-        for texture in textures:
-            new_texture = []
-            for channel_idx in range(texture.shape[channel_dim]):
-                new_texture.append(text2grid(vertices, np.take(texture, channel_idx, axis=channel_dim)))
-            new_textures.append(new_texture)
-        new_textures = np.asarray(new_textures)
-        new_order = list(range(len(new_textures.shape)))
-        new_order.remove(1)
-        new_order.insert(new_channel_dim + 1, 1)
-        return new_textures.transpose(new_order)
-    return textures2grid
+setups = pd.read_table(os.path.join(args.outdir, "pretrain", "setups.tsv"))
+run_id = int(time.time())
+print(run_id)
+setups = pd.concat([
+    setups,
+    pd.DataFrame({
+        "id": [run_id],
+        "args": [params],
+        "best_epoch": [0]})],
+    ignore_index=True)
+setups.to_csv(os.path.join(args.outdir, "pretrain", "setups.tsv"),
+    index=False, sep="\t")
 
-def composed_transform(textures):
-    transform_to_grid = transform_to_grid_wrapper()
-    return clip_values(transform_to_grid(textures))
-if use_grid:
-    transform = {
-        "surface-lh": composed_transform,#transform_to_grid_wrapper(),
-        "surface-rh": composed_transform,#transform_to_grid_wrapper(),
-    }
-else:
-    order = 7
-    ico_verts, ico_tri = icosahedron(order)
-    down_indices = []
-    for low_order in range(order - 1, args.ico_order - 1, -1):
-        low_ico_verts, low_ico_tri = icosahedron(low_order)
-        down_indices.append(downsample(ico_verts, low_ico_verts))
-        ico_verts = low_ico_verts
-        ico_tri = low_ico_tri
-    def transform(x):
-        downsampled_data = downsample_data(x, 7 - args.ico_order, down_indices)
-        return np.swapaxes(downsampled_data, 1, 2)
+order = 7
+ico_verts, ico_tri = icosahedron(order)
+down_indices = []
+for low_order in range(order - 1, args.ico_order - 1, -1):
+    low_ico_verts, low_ico_tri = icosahedron(low_order)
+    down_indices.append(downsample(ico_verts, low_ico_verts))
+    ico_verts = low_ico_verts
+    ico_tri = low_ico_tri
+def transform(x):
+    downsampled_data = downsample_data(x, 7 - args.ico_order, down_indices)
+    return np.swapaxes(downsampled_data, 1, 2)
 
-input_shape = ((grid_size, grid_size, len(metrics)) if use_grid else
-               (len(metrics), len(ico_verts)))
+input_shape = (len(metrics), len(ico_verts))
 print(input_shape)
 
-activation = "ReLU"
-n_features = len(metrics)
-
-class SelectNthDim(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.dim = dim
-
-    def forward(self, x):
-        return x[self.dim]
-
-if use_grid:
-    encoder = HemiFusionEncoder(n_features, grid_size, args.latent_dim,
-                                fusion_level=args.fusion_level,
-                                conv_flts=args.conv_filters,
-                                activation=activation,
-                                batch_norm=args.batch_norm,
-                                return_dist=False)
-    backbone = nn.Sequential(encoder, SelectNthDim(0))
-else:
-    backbone = SphericalHemiFusionEncoder(
-        n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
-        conv_flts=args.conv_filters, activation=activation,
-        batch_norm=args.batch_norm, conv_mode=args.conv,
-        cachedir=os.path.join(args.outdir, "cached_ico_infos"))
+backbone = SphericalHemiFusionEncoder(
+    n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
+    conv_flts=args.conv_filters, activation=activation,
+    batch_norm=args.batch_norm, conv_mode=args.conv,
+    cachedir=os.path.join(args.outdir, "cached_ico_infos"))
 
 kwargs = {
     "surface-rh": {"metrics": metrics},
@@ -231,18 +187,18 @@ scalers = {mod: None for mod in modalities}
 if args.batch_augment > 0 or args.standardize:
     original_dataset = DataManager(
         dataset=args.data, datasetdir=args.datadir,
-        stratify_on=["sex", "age"], discretize=["age"],
+        stratify_on=["sex", "age", "site"], discretize=["age"],
         modalities=modalities, transform=transform,
         overwrite=overwrite, on_the_fly_transform=None,
         on_the_fly_inter_transform=None,
         test_size=None, **kwargs)
 
     loader = torch.utils.data.DataLoader(
-        original_dataset["train"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-        shuffle=True)
+        original_dataset["train"], batch_size=args.batch_size, num_workers=6,
+        pin_memory=True, shuffle=True)
     valid_loader = torch.utils.data.DataLoader(
-        original_dataset["test"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-        shuffle=True)
+        original_dataset["test"], batch_size=args.batch_size, num_workers=6,
+        pin_memory=True, shuffle=True)
     if args.batch_augment > 0:
         groups = {}
         groups_valid = {}
@@ -303,12 +259,13 @@ if args.batch_augment > 0 or args.standardize:
             groups[modality] = neigh_idx
             groups_valid[modality] = neigh_idx_valid
             print("Groups built.")
-                
+            
+            probabilities = (1, 0.1) if args.algo == "barlow" else (0.5, 0.5)
             batch_transforms[modality] = Bootstrapping(
-                p=(1, 0.1), p_corrupt=args.batch_augment,
+                p=probabilities, p_corrupt=args.batch_augment,
                 groups=groups[modality])
             batch_transforms_valid[modality] = Bootstrapping(
-                p=(1, 0.1), p_corrupt=args.batch_augment,
+                p=probabilities, p_corrupt=args.batch_augment,
                 groups=groups_valid[modality])
 
 
@@ -321,55 +278,52 @@ for modality in modalities:
     transformer = Transformer(["hard", "soft"])
     if args.standardize:
         transformer.register(scalers[modality])
-    if use_grid:
-        channels_to_switch = (2, 0, 1)
-        transformer.register(Permute(channels_to_switch))
     if normalize:
         transformer.register(Normalize())
-    if args.gaussian_blur_augment:
-        if use_grid:
-            # transformer.register(RescaleAsImage(metrics))
-            transformer.register(ToPILImage)
-            transformer.register(GaussianBlur(), pipeline="hard")
-            transformer.register(GaussianBlur(), probability=0.1, pipeline="soft")
-            transformer.register(transforms.ToTensor())
-        else:
-            ico = backbone.ico[args.ico_order]
-            trf = SphericalBlur(
-                ico.vertices, ico.triangles, None,
-                sigma=(0.1, 2),
-                cachedir=os.path.join(args.outdir, "cached_ico_infos"))
+    if args.blur:
+        ico = backbone.ico[args.ico_order]
+        trf = SphericalBlur(
+            ico.vertices, ico.triangles, None,
+            sigma=(0.1, 2),
+            cachedir=os.path.join(args.outdir, "cached_ico_infos"))
+        if args.algo == "barlow":
             transformer.register(trf, pipeline="hard")
             transformer.register(trf, probability=0.1, pipeline="soft")
+        else:
+            transformer.register(trf, probability=0.5)
+    if args.noise:
+        trf = SphericalNoise(sigma=(0.1, 2))
+        if args.algo == "barlow":
+            transformer.register(trf, pipeline="hard")
+            transformer.register(trf, probability=0.1, pipeline="soft")
+        else:
+            transformer.register(trf, probability=0.5)
     if args.cutout:
-        trf = Cutout(patch_size=np.ceil(np.array(input_shape)/4))
-        if not use_grid:
-            ico = backbone.ico[args.ico_order]
-            t = time.time()
-            path_size = min_depth_to_get_n_neighbors(np.ceil(len(ico.vertices) / 4))
-            trf = SphericalRandomCut(
-                ico.vertices, ico.triangles, None,
-                patch_size=path_size,
-                cachedir=os.path.join(args.outdir, "cached_ico_infos"))
-            print(time.time() - t)
-        transformer.register(trf, pipeline="hard")
-        transformer.register(trf, probability=0.5, pipeline="soft")
+        ico = backbone.ico[args.ico_order]
+        t = time.time()
+        path_size = min_depth_to_get_n_neighbors(np.ceil(len(ico.vertices) / 4))
+        trf = SphericalRandomCut(
+            ico.vertices, ico.triangles, None,
+            patch_size=path_size,
+            cachedir=os.path.join(args.outdir, "cached_ico_infos"))
+        print(time.time() - t)
+        if args.algo == "barlow":
+            transformer.register(trf, pipeline="hard")
+            transformer.register(trf, probability=0.5, pipeline="soft")
+        else:
+            transformer.register(trf, probability=0.5)
     on_the_fly_transform[modality] = transformer
-
-# on_the_fly_transform = {
-#     "surface-lh": Transform(normalize, scaler=scalers["surface-lh"]),
-#     "surface-rh": Transform(normalize, scaler=scalers["surface-rh"])
-# }
 
 if args.inter_modal_augment > 0:
     normalizer = Normalize() if args.batch_augment == 0 and normalize else None
+    probabilities = (1, 0.1) if args.algo == "barlow" else (0.5, 0.5)
     on_the_fly_inter_transform = PermuteBeetweenModalities(
-        (1, 0.1), args.inter_modal_augment, ("surface-lh", "surface-rh"),
+        probabilities, args.inter_modal_augment, ("surface-lh", "surface-rh"),
         normalizer)
 
 
 dataset = DataManager(dataset=args.data, datasetdir=args.datadir,
-                      stratify_on=["sex", "age"], discretize=["age"],
+                      stratify_on=["sex", "age", "site"], discretize=["age"],
                       modalities=modalities, transform=transform,
                       overwrite=False, on_the_fly_transform=on_the_fly_transform,
                       on_the_fly_inter_transform=on_the_fly_inter_transform,
@@ -385,64 +339,17 @@ valid_loader = DataLoaderWithBatchAugmentation(batch_transforms_valid,
 print(len(loader))
 print(len(valid_loader))
 
-
-def off_diagonal(x):
-    # return a flattened view of the off-diagonal elements of a square matrix
-    n, m = x.shape
-    assert n == m
-    return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
-
-class BarlowTwins(nn.Module):
-    def __init__(self, args, backbone=backbone):
-        super().__init__()
-        self.args = args
-        self.backbone = backbone
-
-        # projector
-        sizes = [args.latent_dim] + list(map(int, args.projector.split('-')))
-        layers = []
-        for i in range(len(sizes) - 2):
-            layers.append(nn.Linear(sizes[i], sizes[i + 1], bias=False))
-            layers.append(nn.BatchNorm1d(sizes[i + 1]))
-            layers.append(nn.ReLU(inplace=True))
-        layers.append(nn.Linear(sizes[-2], sizes[-1], bias=False))
-        self.projector = nn.Sequential(*layers)
-
-        # normalization layer for the representations z1 and z2
-        self.bn = nn.BatchNorm1d(sizes[-1], affine=False)
-
-    def forward(self, y1, y2):
-        z1 = self.projector(self.backbone(y1))
-        z2 = self.projector(self.backbone(y2))
-
-        # empirical cross-correlation matrix
-        c = self.bn(z1).T @ self.bn(z2)
-
-        # sum the cross-correlation matrix between all gpus
-        c.div_(z1.shape[0])
-
-        on_diag = torch.diagonal(c).add_(-1).pow_(2).sum()
-        off_diag = off_diagonal(c).pow_(2).sum()
-        loss = on_diag + self.args.lambd * off_diag
-        return loss
-
-model = BarlowTwins(args).to(device)
+if args.algo == "barlow":
+    model = BarlowTwins(args, backbone).to(device)
+else:
+    model = yAwareSimCLR(args, backbone).to(device)
 
 
 optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
 if args.reduce_lr:
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.9)
 
-run_name = ("deepint_barlow_{}_surf_{}_features_fusion_{}_act_{}_bn_{}_conv_{}"
-    "_latent_{}_wd_{}_{}_epochs_lr_{}_bs_{}_ba_{}_ima_{}_gba_{}_cutout_{}"
-    "_normalize_{}_standardize_{}").format(
-        args.data, n_features, args.fusion_level, activation,
-        args.batch_norm, "-".join([str(s) for s in args.conv_filters]), args.latent_dim,
-        args.weight_decay, args.epochs, args.learning_rate, args.batch_size,
-        args.batch_augment, args.inter_modal_augment, args.gaussian_blur_augment,
-        args.cutout, args.normalize, args.standardize)
-
-checkpoint_dir = os.path.join(checkpoint_dir, run_name)
+checkpoint_dir = os.path.join(checkpoint_dir, str(run_id))
 if not os.path.isdir(checkpoint_dir):
     os.makedirs(checkpoint_dir)
 
@@ -450,7 +357,7 @@ checkpoint_path = os.path.join(checkpoint_dir, "model_epoch_{}.pth")
 
 use_board = False
 if args.epochs > 0 and use_board:
-    board = Board(env=run_name)
+    board = Board(env=args)
 
 print(model)
 print("Number of trainable parameters : ",
@@ -538,8 +445,13 @@ for epoch in range(start_epoch, args.epochs + 1):
         if epoch != args.start_epoch:
             idx_epoch = epoch-args.start_epoch
             last_average_saved_valid_losses = np.mean(valid_losses[(idx_epoch - args.save_freq + 1):idx_epoch + 1])
+            print(last_average_saved_valid_losses)
+            print(best_average_valid_loss)
             if last_average_saved_valid_losses < best_average_valid_loss:
                 best_saved_epoch = epoch
+                setups.loc[setups["id"] == run_id, "best_epoch"] = best_saved_epoch
+                setups.to_csv(os.path.join(args.outdir, "pretrain", "setups.tsv"),
+                    index=False, sep="\t")
         # torch.save(model.backbone[0].state_dict(),
         #     os.path.join(checkpoint_dir, "encoder_epoch_{}.pth".format(epoch)))
     if args.reduce_lr:
@@ -555,29 +467,15 @@ plt.savefig(os.path.join(checkpoint_dir, "losses.pdf"))
 
 idx_epoch = epoch-args.start_epoch
 last_average_saved_valid_losses = np.mean(valid_losses[max((idx_epoch - args.save_freq + 1), 0):idx_epoch + 1])
+print(last_average_saved_valid_losses)
 if last_average_saved_valid_losses < best_average_valid_loss:
-    best_saved_epoch = epoch
+    setups.loc[setups["id"] == run_id, "best_epoch"] = epoch
+    setups.to_csv(os.path.join(args.outdir, "pretrain", "setups.tsv"),
+        index=False, sep="\t")
 
 module_to_save = model.backbone
-if use_grid:
-    module_to_save = module_to_save[0]
 torch.save(module_to_save.state_dict(),
            os.path.join(checkpoint_dir, "encoder.pth"))
-torch.save(model.state_dict(),
-           os.path.join(checkpoint_dir, "barlow.pth"))
 
-if not os.path.exists(os.path.join(args.outdir, "pretrain_barlow", "setups.tsv")):
-    setups = pd.DataFrame.from_dict(dict(id=[], path=[], epoch=[]))
-    max_id = -1
-else:
-    setups = pd.read_table(os.path.join(args.outdir, "pretrain_barlow", "setups.tsv"))
-    max_id = setups["id"].max()
-setups = pd.concat([
-    setups,
-    pd.DataFrame({
-        "id": [max_id + 1],
-        "path": [os.path.join(checkpoint_dir, "encoder.pth")],
-        "epoch": [best_saved_epoch]})],
-    ignore_index=True)
-setups.to_csv(os.path.join(args.outdir, "pretrain_barlow", "setups.tsv"),
-              index=False, sep="\t")
+
+
