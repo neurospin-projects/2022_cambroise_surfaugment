@@ -383,16 +383,20 @@ for epoch in range(start_epoch, args.epochs + 1):
     stats = dict(epoch=epoch, lr=optimizer.param_groups[0]['lr'],
                  loss=0, valid_loss=0)
     for step, data in enumerate(loader, start=epoch * len(loader)):
-        data, _, _ = data
+        data, metadata, _ = data
         y1_lh, y2_lh = data["surface-lh"]
         y1_rh, y2_rh = data["surface-rh"]
         y1_lh = y1_lh.float().to(device)
         y2_lh = y2_lh.float().to(device)
         y1_rh = y1_rh.float().to(device)
         y2_rh = y2_rh.float().to(device)
+        labels = metadata["age"].float().to(device)
+        forwarded = [(y1_lh, y1_rh), (y2_lh, y2_rh)]
+        if args.algo == "simCLR":
+            forwarded.append(labels)
         optimizer.zero_grad()
         with torch.cuda.amp.autocast():
-            loss = model.forward((y1_lh, y1_rh), (y2_lh, y2_rh))
+            loss = model.forward(*forwarded)
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
@@ -411,15 +415,19 @@ for epoch in range(start_epoch, args.epochs + 1):
     model.eval()
     with torch.no_grad():
         for step, data in enumerate(valid_loader, start=epoch * len(valid_loader)):
-            data, _, _ = data
+            data, metadata, _ = data
             y1_lh, y2_lh = data["surface-lh"]
             y1_rh, y2_rh = data["surface-rh"]
             y1_lh = y1_lh.float().to(device)
             y2_lh = y2_lh.float().to(device)
             y1_rh = y1_rh.float().to(device)
             y2_rh = y2_rh.float().to(device)
+            labels = metadata["age"].float().to(device)
+            forwarded = [(y1_lh, y1_rh), (y2_lh, y2_rh)]
+            if args.algo == "simCLR":
+                forwarded.append(labels)
             with torch.cuda.amp.autocast():
-                loss = model.forward((y1_lh, y1_rh), (y2_lh, y2_rh))
+                loss = model.forward(*forwarded)
             
             stats["valid_loss"] += loss.item()
             stats["time"] = int(time.time() - start_time)
@@ -449,6 +457,7 @@ for epoch in range(start_epoch, args.epochs + 1):
             if last_average_saved_valid_losses < best_average_valid_loss:
                 best_saved_epoch = epoch
                 best_average_valid_loss = last_average_saved_valid_losses
+                setups = pd.read_table(os.path.join(args.outdir, "pretrain", "setups.tsv"))
                 setups.loc[setups["id"] == run_id, "best_epoch"] = best_saved_epoch
                 setups.to_csv(os.path.join(args.outdir, "pretrain", "setups.tsv"),
                     index=False, sep="\t")
@@ -469,6 +478,7 @@ idx_epoch = epoch-args.start_epoch
 last_average_saved_valid_losses = np.mean(valid_losses[max((idx_epoch - args.save_freq + 1), 0):idx_epoch + 1])
 print(last_average_saved_valid_losses)
 if last_average_saved_valid_losses < best_average_valid_loss:
+    setups = pd.read_table(os.path.join(args.outdir, "pretrain", "setups.tsv"))
     setups.loc[setups["id"] == run_id, "best_epoch"] = epoch
     setups.to_csv(os.path.join(args.outdir, "pretrain", "setups.tsv"),
         index=False, sep="\t")

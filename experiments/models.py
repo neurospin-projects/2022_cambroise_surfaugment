@@ -82,12 +82,15 @@ class yAwareSimCLR(nn.Module):
         self.return_logits = return_logits
         self.INF = 1e8
 
-    def forward(self, y1, y2, labels):
-
+    def forward(self, y1, y2, labels=None):
+        
         z_i = self.projector(self.backbone(y1))
         z_j = self.projector(self.backbone(y2))
         N = len(z_i)
-        assert N == len(labels), "Unexpected labels length: %i"%len(labels)
+        if labels is not None:
+            assert N == len(labels), "Unexpected labels length: %i"%len(labels)
+        else:
+            assert self.sigma == 0, "Labels must be provided when sigma is > 0"
         z_i = func.normalize(z_i, p=2, dim=-1)
         z_j = func.normalize(z_j, p=2, dim=-1)
         sim_zii= (z_i @ z_i.T) / self.temperature
