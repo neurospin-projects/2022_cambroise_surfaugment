@@ -315,6 +315,7 @@ for modality in modalities:
             transformer.register(trf, probability=0.5, pipeline="soft")
         else:
             transformer.register(trf, probability=0.5)
+    print(transformer.transforms)
     on_the_fly_transform[modality] = transformer
 
 if args.inter_modal_augment > 0:
