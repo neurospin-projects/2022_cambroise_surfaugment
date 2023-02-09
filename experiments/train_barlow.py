@@ -147,6 +147,8 @@ print(" ".join(sys.argv), file=stats_file)
 
 setups = pd.read_table(os.path.join(args.outdir, "pretrain", "setups.tsv"))
 run_id = int(time.time())
+if args.start_epoch > 1:
+    run_id = setups.loc[setups["args"] == params, "id"].item()
 print(run_id)
 setups = pd.concat([
     setups,
@@ -476,7 +478,6 @@ plt.savefig(os.path.join(checkpoint_dir, "losses.pdf"))
 
 idx_epoch = epoch-args.start_epoch
 last_average_saved_valid_losses = np.mean(valid_losses[max((idx_epoch - args.save_freq + 1), 0):idx_epoch + 1])
-print(last_average_saved_valid_losses)
 if last_average_saved_valid_losses < best_average_valid_loss:
     setups = pd.read_table(os.path.join(args.outdir, "pretrain", "setups.tsv"))
     setups.loc[setups["id"] == run_id, "best_epoch"] = epoch
