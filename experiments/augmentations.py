@@ -33,7 +33,8 @@ class Transformer(object):
         if type(self.transforms) is list:
             transforms = [self.transforms]
         elif pipeline is None:
-            transforms = list(self.transforms.values())
+            transforms = [
+                self.transforms[key] for key in self.transforms.keys()]
         else:
             transforms = [self.transforms[pipeline]]
         for transform in transforms:
