@@ -443,11 +443,16 @@ for epoch in range(start_epoch, args.epochs + 1):
                 for name, metric in eval_metrics.items():
                     if name not in stats:
                         stats["val_" + name] = 0
-                    stats["val_" + name] += metric(logits, target) / len(valid_loader)
+                    stats["val_" + name] += metric(
+                        logits.detach().cpu().numpy(),
+                        target.detach().cpu().numpy()) / len(valid_loader)
             
             stats["valid_loss"] += loss.item()
             stats["time"] = int(time.time() - start_time)
-    mean_loss = stats["valid_loss"] / len(dataset["test"]) if (stats["valid_loss"] / len(valid_loader)) < threshold_valid_loss or epoch == 1 else valid_losses[epoch-args.start_epoch-1]
+    mean_loss = (
+        stats["valid_loss"] / len(dataset["test"]) if
+            (stats["valid_loss"] / len(valid_loader)) < threshold_valid_loss
+            or epoch == 1 else valid_losses[epoch-args.start_epoch-1])
     if use_board:
         board.update_plot("validation loss", epoch, mean_loss)
     valid_losses.append(mean_loss)
