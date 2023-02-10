@@ -22,7 +22,7 @@ from brainboard import Board
 
 from multimodaldatasets.datasets import DataManager, DataLoaderWithBatchAugmentation
 from augmentations import Normalize, PermuteBeetweenModalities, Bootstrapping, Reshape, Transformer
-from models import BarlowTwins, yAwareSimCLR
+from models import BarlowTwins, yAwareSimCLR, simCLR
 
 
 parser = argparse.ArgumentParser(description="Train Barlow Twins")
@@ -317,7 +317,6 @@ for modality in modalities:
             transformer.register(trf, probability=0.5, pipeline="soft")
         else:
             transformer.register(trf, probability=0.5)
-    print(transformer.transforms)
     on_the_fly_transform[modality] = transformer
 
 if args.inter_modal_augment > 0:
@@ -347,8 +346,10 @@ valid_loader = DataLoaderWithBatchAugmentation(batch_transforms_valid,
 
 if args.algo == "barlow":
     model = BarlowTwins(args, backbone).to(device)
-else:
+elif args.sigma > 0:
     model = yAwareSimCLR(args, backbone, return_logits=True).to(device)
+else:
+    model = simCLR(args, backbone, return_logits=True).to(device)
 
 
 optimizer = optim.Adam(
@@ -398,7 +399,7 @@ for epoch in range(start_epoch, args.epochs + 1):
         y2_rh = y2_rh.float().to(device)
         labels = metadata["age"].float().to(device)
         forwarded = [(y1_lh, y1_rh), (y2_lh, y2_rh)]
-        if args.algo == "simCLR":
+        if args.algo == "simCLR" and args.sigma > 0:
             forwarded.append(labels)
         optimizer.zero_grad()
         with torch.cuda.amp.autocast():
@@ -432,7 +433,7 @@ for epoch in range(start_epoch, args.epochs + 1):
             y2_rh = y2_rh.float().to(device)
             labels = metadata["age"].float().to(device)
             forwarded = [(y1_lh, y1_rh), (y2_lh, y2_rh)]
-            if args.algo == "simCLR":
+            if args.algo == "simCLR" and args.sigma > 0:
                 forwarded.append(labels)
             with torch.cuda.amp.autocast():
                 loss = model.forward(*forwarded)
@@ -440,12 +441,12 @@ for epoch in range(start_epoch, args.epochs + 1):
             if args.algo == "simCLR":
                 loss, logits, target = loss
                 
-                for name, metric in eval_metrics.items():
-                    if name not in stats:
-                        stats["val_" + name] = 0
-                    stats["val_" + name] += metric(
-                        logits.detach().cpu().numpy(),
-                        target.detach().cpu().numpy()) / len(valid_loader)
+                # for name, metric in eval_metrics.items():
+                #     if name not in stats:
+                #         stats["val_" + name] = 0
+                #     stats["val_" + name] += metric(
+                #         logits.detach().cpu().numpy(),
+                #         target.detach().cpu().numpy()) / len(valid_loader)
             
             stats["valid_loss"] += loss.item()
             stats["time"] = int(time.time() - start_time)
