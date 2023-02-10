@@ -7,7 +7,7 @@ import joblib
 import numpy as np
 from matplotlib import pyplot as plt
 from sklearn.decomposition import PCA
-from sklearn.metrics import r2_score, mean_absolute_error
+from sklearn.metrics import r2_score, mean_absolute_error, accuracy_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsRegressor
 import pandas as pd
@@ -186,6 +186,8 @@ kwargs = {
     # "clinical": {"z_score": False}
 }
 
+eval_metrics = {"accuracy": accuracy_score}
+
 scalers = {mod: None for mod in modalities}
 if args.batch_augment > 0 or args.standardize:
     original_dataset = DataManager(
@@ -346,10 +348,11 @@ valid_loader = DataLoaderWithBatchAugmentation(batch_transforms_valid,
 if args.algo == "barlow":
     model = BarlowTwins(args, backbone).to(device)
 else:
-    model = yAwareSimCLR(args, backbone).to(device)
+    model = yAwareSimCLR(args, backbone, return_logits=True).to(device)
 
 
-optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+optimizer = optim.Adam(
+    model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
 if args.reduce_lr:
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.9)
 
@@ -431,6 +434,14 @@ for epoch in range(start_epoch, args.epochs + 1):
                 forwarded.append(labels)
             with torch.cuda.amp.autocast():
                 loss = model.forward(*forwarded)
+            
+            if args.algo == "simCLR":
+                loss, logits, target = loss
+                
+                for name, metric in metrics.items():
+                    if name not in stats:
+                        stats["val_" + name] = 0
+                    stats["val_" + name] += metric(logits, target) / len(valid_loader)
             
             stats["valid_loss"] += loss.item()
             stats["time"] = int(time.time() - start_time)
