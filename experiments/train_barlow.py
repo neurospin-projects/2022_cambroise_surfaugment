@@ -440,7 +440,7 @@ for epoch in range(start_epoch, args.epochs + 1):
             if args.algo == "simCLR":
                 loss, logits, target = loss
                 
-                for name, metric in metrics.items():
+                for name, metric in eval_metrics.items():
                     if name not in stats:
                         stats["val_" + name] = 0
                     stats["val_" + name] += metric(logits, target) / len(valid_loader)
