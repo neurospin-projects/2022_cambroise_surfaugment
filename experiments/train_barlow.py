@@ -403,6 +403,8 @@ for epoch in range(start_epoch, args.epochs + 1):
         optimizer.zero_grad()
         with torch.cuda.amp.autocast():
             loss = model.forward(*forwarded)
+        if args.algo == "simCLR":
+            loss = loss[0]
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
