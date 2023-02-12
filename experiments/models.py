@@ -50,14 +50,6 @@ class yAwareSimCLR(nn.Module):
     from https://github.com/Duplums/yAwareContrastiveLearning/
     """
     def __init__(self, args, backbone, return_logits=False):
-        """
-        :param kernel: a callable function f: [K, *] x [K, *] -> [K, K]
-                                              y1, y2          -> f(y1, y2)
-                        where (*) is the dimension of the labels (yi)
-        default: an rbf kernel parametrized by 'sigma' which corresponds to gamma=1/(2*sigma**2)
-        :param temperature:
-        :param return_logits:
-        """
         super().__init__()
         self.backbone = backbone
         # projector
@@ -123,11 +115,11 @@ class yAwareSimCLR(nn.Module):
 
 
 class simCLR(nn.Module):
-    """
-    Normalized Temperature Cross-Entropy Loss for Constrastive Learning
+    """ Class implementing the simCLR model. Code originally insipired
+    from https://github.com/Duplums/yAwareContrastiveLearning/
     Refer for instance to:
     Ting Chen, Simon Kornblith, Mohammad Norouzi, Geoffrey Hinton
-    A Simple Framework for Contrastive Learning of Visual Representations, arXiv 2020
+    A Simple Framework for Contrastive Learning of Visual Representations
     """
 
     def __init__(self, args, backbone, return_logits=False):
@@ -167,6 +159,3 @@ class simCLR(nn.Module):
             return (loss_i + loss_j), sim_zij, correct_pairs
 
         return (loss_i + loss_j)
-
-    def __str__(self):
-        return "{}(temp={})".format(type(self).__name__, self.temperature)

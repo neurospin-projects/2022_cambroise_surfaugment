@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import time
+import shutil
 import joblib
 import numpy as np
 from matplotlib import pyplot as plt
@@ -21,7 +22,7 @@ from surfify.utils import setup_logging, icosahedron, downsample_data, downsampl
 from brainboard import Board
 
 from multimodaldatasets.datasets import DataManager, DataLoaderWithBatchAugmentation
-from augmentations import Normalize, PermuteBeetweenModalities, Bootstrapping, Reshape, Transformer
+from augmentations import Normalize, PermuteBeetweenModalities, Bootstrapping, Reshape, Transformer, SwitchModalities
 from models import BarlowTwins, yAwareSimCLR, simCLR
 
 
@@ -32,7 +33,7 @@ parser.add_argument(
 parser.add_argument(
     "--datadir", metavar="DIR", help="data directory path.", required=True)
 parser.add_argument(
-    "--ico-order", default=6, type=int,
+    "--ico-order", default=5, type=int,
     help="the icosahedron order.")
 parser.add_argument(
     "--epochs", default=100, type=int, metavar="N",
@@ -53,7 +54,7 @@ parser.add_argument(
     "--weight-decay", default=1e-6, type=float, metavar="W",
     help="weight decay.")
 parser.add_argument(
-    "--conv-filters", default="64-128-128-256-256", type=str, metavar="F",
+    "--conv-filters", default="128-128-256-256", type=str, metavar="F",
     help="convolutional filters at each layer.")
 parser.add_argument(
     "--projector", default="256-512-512", type=str, metavar="F",
@@ -147,8 +148,28 @@ print(" ".join(sys.argv), file=stats_file)
 
 setups = pd.read_table(os.path.join(args.outdir, "pretrain", "setups.tsv"))
 run_id = int(time.time())
+
+def same_params_but_epochs(args_str):
+    epochs = args_str.split("_epochs")[0].split("_")[-1]
+    return (params == args_str.replace(
+        f"{epochs}_epochs", f"{args.epochs}_epochs"))
+
 if args.start_epoch > 1:
-    run_id = setups.loc[setups["args"] == params, "id"].item()
+    old_run_id = setups.loc[setups.args == params, "id"]
+    other_run_id = setups.loc[setups.args.apply(same_params_but_epochs), "id"]
+    if len(old_run_id) == 0 and len(other_run_id) > 0:
+        other_run_id = other_run_id.values[0]
+        print(other_run_id)
+        old_path = os.path.join(checkpoint_dir, str(other_run_id))
+        new_path = os.path.join(checkpoint_dir, str(run_id))
+        os.makedirs(new_path)
+        for file_name in os.listdir(old_path):
+            old_file = os.path.join(old_path, file_name)
+            new_file = os.path.join(new_path, file_name)
+            if os.path.isfile(old_file):
+                shutil.copy(old_file, new_file)
+    else:
+        run_id = old_run_id.item()
 print(run_id)
 setups = pd.concat([
     setups,

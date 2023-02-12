@@ -194,7 +194,7 @@ class Bootstrapping(object):
         if type(batch_data) not in [tuple, list]:
             batch_data = [batch_data]
             return_single = True
-        
+
         if type(self.p) not in [list, tuple]:
             self.p = [self.p] * len(batch_data)
 
@@ -214,10 +214,10 @@ class Bootstrapping(object):
                 corruption_level = np.random.random() * (self.p_corrupt - min_corruption) + min_corruption
                 p_change_selected_feature = 0.6
                 p_select_feature = corruption_level / p_change_selected_feature
-                
+
                 mask_features = np.random.binomial(1, p_select_feature, shape[2:])
                 selected_feature_idx = np.where(mask_features == 1)
-          
+
                 masks = np.zeros_like(x)
                 if self.across_channels:
                     restreined_masks = np.random.binomial(1, p_change_selected_feature, (n_samples, *shape[2:]))
@@ -226,7 +226,7 @@ class Bootstrapping(object):
                     restreined_masks = np.random.binomial(1, p_change_selected_feature, x.shape)
 
                 masks[:, :, selected_feature_idx] = restreined_masks[:, :, selected_feature_idx]
-                
+
                 x_bar = torch.zeros_like(x)
                 for indices in zip(*selected_feature_idx):
                     # row, column = indices
@@ -256,7 +256,7 @@ class Bootstrapping(object):
 
                 # Corrupt samples
                 x_tilde = x * (1-masks) + x_bar * masks
-                
+
             if self.normalizer is not None:
                 x_tilde = self.normalizer(x_tilde)
 
@@ -290,17 +290,16 @@ class PermuteBeetweenModalities(object):
             mod1 = [mod1]
             mod2 = [mod2]
             return_single = True
-        
+
         if type(self.p) not in [list, tuple]:
             self.p = [self.p] * len(mod1)
 
         if type(self.p_corrupt) not in [list, tuple]:
             self.p_corrupt = [self.p_corrupt] * len(mod1)
 
-        
         if True in [mod1[i].shape != mod2[i].shape for i in range(len(mod1))]:
             raise ValueError("Both modalities must have the same dimensions.")
-        
+
         new_mod1 = []
         new_mod2 = []
         min_corruption = 0.05
@@ -331,10 +330,76 @@ class PermuteBeetweenModalities(object):
 
             new_mod1.append(new_data1)
             new_mod2.append(new_data2)
-        
+
         if return_single:
             new_mod1 = new_mod1[0]
             new_mod2 = new_mod2[0]
         data[self.modalities[0]] = new_mod1
         data[self.modalities[1]] = new_mod2
         return data
+
+
+class SwitchModalities(object):
+    def __init__(self, p, modalities, across_channels=True,
+                 normalizer=Normalize()):
+        self.p = p
+        self.across_channels = across_channels
+        self.modalities = modalities
+        self.normalizer = normalizer
+
+        if type(modalities) not in [list, tuple] or len(modalities) != 2:
+            raise ValueError("modalities must contain exactly 2 data modalities.")
+
+    def __call__(self, data):
+
+        mod1 = data[self.modalities[0]]
+        mod2 = data[self.modalities[1]]
+
+        if type(mod1) != type(mod2):
+            raise ValueError("Both modalities must be of the same type.")
+
+        return_single = False
+        if type(mod1) not in [tuple, list]:
+            mod1 = [mod1]
+            mod2 = [mod2]
+            return_single = True
+
+        if type(self.p) not in [list, tuple]:
+            self.p = [self.p] * len(mod1)
+
+        if type(self.p_corrupt) not in [list, tuple]:
+            self.p_corrupt = [self.p_corrupt] * len(mod1)
+
+
+        if True in [mod1[i].shape != mod2[i].shape for i in range(len(mod1))]:
+            raise ValueError("Both modalities must have the same dimensions.")
+
+        new_mod1 = []
+        new_mod2 = []
+        for idx in range(len(mod1)):
+            shape = mod1[idx].shape
+            n_channels = shape[0]
+            new_data1 = mod1[idx]
+            new_data2 = mod2[idx]
+            if self.across_channels:
+                for channel_idx in range(n_channels):
+                    if np.random.random() < self.p[idx]:
+                        new_data1[channel_idx] = mod2[idx][channel_idx]
+                        new_data2[channel_idx] = mod1[idx][channel_idx]
+            elif np.random.random() < self.p[idx]:
+                new_data1 = mod2[idx]
+                new_data2 = mod1[idx]
+            if self.normalizer is not None:
+                new_data1 = self.normalizer(new_data1)
+                new_data2 = self.normalizer(new_data2)
+
+            new_mod1.append(new_data1)
+            new_mod2.append(new_data2)
+
+        if return_single:
+            new_mod1 = new_mod1[0]
+            new_mod2 = new_mod2[0]
+        data[self.modalities[0]] = new_mod1
+        data[self.modalities[1]] = new_mod2
+        return data
+
