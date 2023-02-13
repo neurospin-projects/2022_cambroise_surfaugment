@@ -479,7 +479,7 @@ for epoch in range(start_epoch, args.epochs + 1):
 
     model.eval()
     with torch.no_grad():
-        for step, data in enumerate(valid_loader, start=epoch * len(valid_loader)):
+        for data in valid_loader:
             data, metadata, _ = data
             y1_lh, y2_lh = data["surface-lh"]
             y1_rh, y2_rh = data["surface-rh"]
@@ -500,7 +500,7 @@ for epoch in range(start_epoch, args.epochs + 1):
             stats["valid_loss"] += loss.item()
             stats["time"] = int(time.time() - start_time)
         regressor = Ridge()
-        for step, data in enumerate(train_no_augment_loader, start=epoch * len(valid_loader)):
+        for data in train_no_augment_loader:
             data, metadata, _ = data
             y1_lh = data["surface-lh"]
             y1_rh = data["surface-rh"]
@@ -523,7 +523,7 @@ for epoch in range(start_epoch, args.epochs + 1):
             
             stats["time"] = int(time.time() - start_time)
 
-        for step, data in enumerate(valid_no_augment_loader, start=epoch * len(valid_loader)):
+        for data in valid_no_augment_loader:
             data, metadata, _ = data
             y1_lh = data["surface-lh"]
             y1_rh = data["surface-rh"]
@@ -560,7 +560,7 @@ for epoch in range(start_epoch, args.epochs + 1):
         stats["loss"] /= len(dataset["train"])
         stats["valid_loss"] /= len(dataset["test"])
         for name, value in stats.items():
-            if type(value) is float:
+            if type(value) in [float, np.float32, np.float64]:
                 stats[name] = round(value, 8)
         print(json.dumps(stats))
         print(json.dumps(stats), file=stats_file)
