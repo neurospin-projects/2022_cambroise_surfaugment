@@ -11,6 +11,7 @@ from sklearn.decomposition import PCA
 from sklearn.metrics import r2_score, mean_absolute_error, accuracy_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsRegressor
+from sklearn.linear_model import Ridge
 import pandas as pd
 
 import torch
@@ -107,6 +108,9 @@ parser.add_argument(
 parser.add_argument(
     "--algo", default="barlow", choices=("barlow", "simCLR"),
     help="the self-supervised algo.")
+parser.add_argument(
+    "--flip", action="store_true",
+    help="optionnally uses flip augment.")
 
 args = parser.parse_args()
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -207,7 +211,8 @@ kwargs = {
     # "clinical": {"z_score": False}
 }
 
-eval_metrics = {"accuracy": accuracy_score}
+eval_metrics = {"mae": mean_absolute_error}
+metric_for_perf = "mae"
 
 scalers = {mod: None for mod in modalities}
 if args.batch_augment > 0 or args.standardize:
@@ -348,19 +353,44 @@ if args.inter_modal_augment > 0:
         normalizer)
 
 
-dataset = DataManager(dataset=args.data, datasetdir=args.datadir,
-                      stratify_on=["sex", "age", "site"], discretize=["age"],
-                      modalities=modalities, transform=transform,
-                      overwrite=False, on_the_fly_transform=on_the_fly_transform,
-                      on_the_fly_inter_transform=on_the_fly_inter_transform,
-                      test_size=None, **kwargs)
+dataset = DataManager(
+    dataset=args.data, datasetdir=args.datadir,
+    stratify_on=["sex", "age", "site"], discretize=["age"],
+    modalities=modalities, transform=transform,
+    overwrite=False, on_the_fly_transform=on_the_fly_transform,
+    on_the_fly_inter_transform=on_the_fly_inter_transform,
+    test_size=None, **kwargs)
 
-loader = DataLoaderWithBatchAugmentation(batch_transforms,
-    dataset["train"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-    shuffle=True)
-valid_loader = DataLoaderWithBatchAugmentation(batch_transforms_valid,
-    dataset["test"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-    shuffle=True)
+
+valid_on_the_fly_transform = dict()
+for modality in modalities:
+    transformer = Transformer()
+    if args.standardize:
+        transformer.register(scalers[modality])
+    if args.normalize:
+        transformer.register(Normalize())
+    valid_on_the_fly_transform[modality] = transformer
+
+dataset_valid = DataManager(
+    dataset=args.data, datasetdir=args.datadir,
+    stratify_on=["sex", "age", "site"], discretize=["age"],
+    modalities=modalities, transform=transform,
+    overwrite=False, on_the_fly_transform=valid_on_the_fly_transform,
+    on_the_fly_inter_transform=on_the_fly_inter_transform,
+    test_size=None, **kwargs)
+
+loader = DataLoaderWithBatchAugmentation(
+    batch_transforms, dataset["train"], batch_size=args.batch_size,
+    num_workers=6, pin_memory=True, shuffle=True)
+valid_loader = DataLoaderWithBatchAugmentation(
+    batch_transforms_valid, dataset["test"], batch_size=args.batch_size,
+    num_workers=6, pin_memory=True, shuffle=True)
+train_no_augment_loader = torch.utils.data.DataLoader(
+    dataset_valid["train"], batch_size=args.batch_size, num_workers=6,
+    pin_memory=True, shuffle=True)
+valid_no_augment_loader = torch.utils.data.DataLoader(
+    dataset_valid["test"], batch_size=args.batch_size, num_workers=6,
+    pin_memory=True, shuffle=True)
 
 # print(len(loader))
 # print(len(valid_loader))
@@ -393,6 +423,8 @@ print("Number of trainable parameters : ",
         sum(p.numel() for p in model.parameters() if p.requires_grad))
 losses = []
 valid_losses = []
+perfs = []
+valid_perfs = []
 start_epoch = args.start_epoch
 if args.start_epoch > 1:
     checkpoint = torch.load(checkpoint_path.format(args.start_epoch), map_location=f"{device}:0")
@@ -400,13 +432,16 @@ if args.start_epoch > 1:
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     losses.append(checkpoint["loss"])
     valid_losses.append(checkpoint["valid_loss"])
+    if "perf" in checkpoint.keys():
+        perfs.append(checkpoint["perf"])
+        valid_perfs.append(checkpoint["valid_perf"])
     start_epoch += 1
 
 threshold_valid_loss = 1000
 start_time = time.time()
 scaler = torch.cuda.amp.GradScaler()
 best_saved_epoch = args.start_epoch
-best_average_valid_loss = valid_losses[0] if args.start_epoch > 1 else 100000
+best_average_perf = 10000 if len(valid_perfs) == 0 else valid_perfs[0]
 for epoch in range(start_epoch, args.epochs + 1):
     stats = dict(epoch=epoch, lr=optimizer.param_groups[0]['lr'],
                  loss=0, valid_loss=0)
@@ -461,15 +496,54 @@ for epoch in range(start_epoch, args.epochs + 1):
             
             if args.algo == "simCLR":
                 loss, logits, target = loss
-                
-                # for name, metric in eval_metrics.items():
-                #     if name not in stats:
-                #         stats["val_" + name] = 0
-                #     stats["val_" + name] += metric(
-                #         logits.detach().cpu().numpy(),
-                #         target.detach().cpu().numpy()) / len(valid_loader)
             
             stats["valid_loss"] += loss.item()
+            stats["time"] = int(time.time() - start_time)
+        regressor = Ridge()
+        for step, data in enumerate(train_no_augment_loader, start=epoch * len(valid_loader)):
+            data, metadata, _ = data
+            y1_lh = data["surface-lh"]
+            y1_rh = data["surface-rh"]
+            y1_lh = y1_lh.float().to(device)
+            y1_rh = y1_rh.float().to(device)
+            labels = metadata["age"].float().to(device)
+            with torch.cuda.amp.autocast():
+                representations = model.backbone.forward((y1_lh, y1_rh))
+            
+            labels = labels.detach().cpu().numpy()
+            representations = representations.detach().cpu().numpy()
+
+            regressor.fit(representations, labels)
+            preds = regressor.predict(representations) 
+            for name, metric in eval_metrics.items():
+                if name not in stats:
+                    stats[name] = 0
+                stats[name] += metric(
+                    preds, labels) / len(train_no_augment_loader)
+            
+            stats["time"] = int(time.time() - start_time)
+
+        for step, data in enumerate(valid_no_augment_loader, start=epoch * len(valid_loader)):
+            data, metadata, _ = data
+            y1_lh = data["surface-lh"]
+            y1_rh = data["surface-rh"]
+            y1_lh = y1_lh.float().to(device)
+            y1_rh = y1_rh.float().to(device)
+            labels = metadata["age"].float().to(device)
+            with torch.cuda.amp.autocast():
+                representations = model.backbone.forward((y1_lh, y1_rh))
+            
+            labels = labels.detach().cpu().numpy()
+            representations = representations.detach().cpu().numpy()
+
+            preds = regressor.predict(representations)  
+            for name, metric in eval_metrics.items():
+                subname = "valid_" + name
+                if subname not in stats:
+                    stats[subname] = 0
+                stats[subname] += metric(
+                    preds, labels) / len(valid_no_augment_loader)
+            
             stats["time"] = int(time.time() - start_time)
     mean_loss = (
         stats["valid_loss"] / len(dataset["test"]) if
@@ -478,11 +552,16 @@ for epoch in range(start_epoch, args.epochs + 1):
     if use_board:
         board.update_plot("validation loss", epoch, mean_loss)
     valid_losses.append(mean_loss)
+    perfs.append(stats[metric_for_perf])
+    valid_perfs.append(stats["valid_" + metric_for_perf])
 
     model.train()
     if epoch % args.print_freq == 0:
         stats["loss"] /= len(dataset["train"])
         stats["valid_loss"] /= len(dataset["test"])
+        for name, value in stats.items():
+            if type(value) is float:
+                stats[name] = round(value, 8)
         print(json.dumps(stats))
         print(json.dumps(stats), file=stats_file)
 
@@ -493,13 +572,16 @@ for epoch in range(start_epoch, args.epochs + 1):
             "optimizer_state_dict": optimizer.state_dict(),
             "loss": losses[epoch-args.start_epoch],
             "valid_loss": mean_loss,
+            "perf": perfs[epoch-args.start_epoch],
+            "valid_perf": valid_perfs[epoch-args.start_epoch],
             }, checkpoint_path.format(epoch))
         if epoch != args.start_epoch:
             idx_epoch = epoch-args.start_epoch
-            last_average_saved_valid_losses = np.mean(valid_losses[(idx_epoch - args.save_freq + 1):idx_epoch + 1])
-            if last_average_saved_valid_losses < best_average_valid_loss:
+            last_average_valid_perfs = np.mean(
+                valid_perfs[(idx_epoch - args.save_freq + 1):idx_epoch + 1])
+            if last_average_valid_perfs < best_average_perf:
                 best_saved_epoch = epoch
-                best_average_valid_loss = last_average_saved_valid_losses
+                best_average_perf = last_average_valid_perfs
                 setups = pd.read_table(os.path.join(args.outdir, "pretrain", "setups.tsv"))
                 setups.loc[setups["id"] == run_id, "best_epoch"] = best_saved_epoch
                 setups.to_csv(os.path.join(args.outdir, "pretrain", "setups.tsv"),
@@ -517,9 +599,17 @@ plt.xlabel("Epoch")
 plt.ylabel("Loss")
 plt.savefig(os.path.join(checkpoint_dir, "losses.pdf"))
 
+plt.plot(range(args.start_epoch, args.epochs + 1), perfs, label="training")
+plt.plot(range(args.start_epoch, args.epochs + 1), valid_perfs, label="validation")
+plt.legend()
+plt.title("Performance during training")
+plt.xlabel("Epoch")
+plt.ylabel(metric_for_perf)
+plt.savefig(os.path.join(checkpoint_dir, "perfs.pdf"))
+
 idx_epoch = epoch-args.start_epoch
-last_average_saved_valid_losses = np.mean(valid_losses[max((idx_epoch - args.save_freq + 1), 0):idx_epoch + 1])
-if last_average_saved_valid_losses < best_average_valid_loss:
+last_average_valid_perfs = np.mean(valid_perfs[max((idx_epoch - args.save_freq + 1), 0):idx_epoch + 1])
+if last_average_valid_perfs < best_average_perf:
     setups = pd.read_table(os.path.join(args.outdir, "pretrain", "setups.tsv"))
     setups.loc[setups["id"] == run_id, "best_epoch"] = epoch
     setups.to_csv(os.path.join(args.outdir, "pretrain", "setups.tsv"),
