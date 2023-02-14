@@ -376,7 +376,6 @@ dataset_valid = DataManager(
     stratify_on=["sex", "age", "site"], discretize=["age"],
     modalities=modalities, transform=transform,
     overwrite=False, on_the_fly_transform=valid_on_the_fly_transform,
-    on_the_fly_inter_transform=on_the_fly_inter_transform,
     test_size=None, **kwargs)
 
 loader = DataLoaderWithBatchAugmentation(
@@ -469,7 +468,6 @@ for epoch in range(start_epoch, args.epochs + 1):
         # optimizer.step()
         
         stats["loss"] += loss.item()
-        stats["time"] = int(time.time() - start_time)
         stats["step"] = step
     mean_loss = stats["loss"] / len(dataset["train"]) if not np.isinf(stats["loss"]) else losses[epoch-args.start_epoch-1]
 
@@ -498,8 +496,9 @@ for epoch in range(start_epoch, args.epochs + 1):
                 loss, logits, target = loss
             
             stats["valid_loss"] += loss.item()
-            stats["time"] = int(time.time() - start_time)
         regressor = Ridge()
+        all_representations = []
+        all_labels = []
         for data in train_no_augment_loader:
             data, metadata, _ = data
             y1_lh = data["surface-lh"]
@@ -510,18 +509,17 @@ for epoch in range(start_epoch, args.epochs + 1):
             with torch.cuda.amp.autocast():
                 representations = model.backbone.forward((y1_lh, y1_rh))
             
-            labels = labels.detach().cpu().numpy()
-            representations = representations.detach().cpu().numpy()
+            all_labels.append(labels.detach().cpu().numpy())
+            all_representations.append(representations.detach().cpu().numpy())
 
-            regressor.fit(representations, labels)
-            preds = regressor.predict(representations) 
-            for name, metric in eval_metrics.items():
-                if name not in stats:
-                    stats[name] = 0
-                stats[name] += metric(
-                    preds, labels) / len(train_no_augment_loader)
-            
-            stats["time"] = int(time.time() - start_time)
+        all_representations = np.concatenate(all_representations)
+        all_labels = np.concatenate(all_labels)
+        regressor.fit(all_representations, all_labels)
+        preds = regressor.predict(all_representations) 
+        for name, metric in eval_metrics.items():
+            if name not in stats:
+                stats[name] = 0
+            stats[name] += metric(preds, all_labels)
 
         for data in valid_no_augment_loader:
             data, metadata, _ = data
@@ -536,7 +534,7 @@ for epoch in range(start_epoch, args.epochs + 1):
             labels = labels.detach().cpu().numpy()
             representations = representations.detach().cpu().numpy()
 
-            preds = regressor.predict(representations)  
+            preds = regressor.predict(representations)
             for name, metric in eval_metrics.items():
                 subname = "valid_" + name
                 if subname not in stats:
@@ -544,7 +542,7 @@ for epoch in range(start_epoch, args.epochs + 1):
                 stats[subname] += metric(
                     preds, labels) / len(valid_no_augment_loader)
             
-            stats["time"] = int(time.time() - start_time)
+    stats["time"] = int(time.time() - start_time)
     mean_loss = (
         stats["valid_loss"] / len(dataset["test"]) if
             (stats["valid_loss"] / len(valid_loader)) < threshold_valid_loss
