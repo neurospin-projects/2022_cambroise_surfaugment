@@ -174,16 +174,18 @@ if args.start_epoch > 1:
                 shutil.copy(old_file, new_file)
     else:
         run_id = old_run_id.item()
+else:
+    setups = pd.concat([
+        setups,
+        pd.DataFrame({
+            "id": [run_id],
+            "args": [params],
+            "best_epoch": [0]})],
+        ignore_index=True)
+    setups.to_csv(os.path.join(args.outdir, "pretrain", "setups.tsv"),
+        index=False, sep="\t")
 print(run_id)
-setups = pd.concat([
-    setups,
-    pd.DataFrame({
-        "id": [run_id],
-        "args": [params],
-        "best_epoch": [0]})],
-    ignore_index=True)
-setups.to_csv(os.path.join(args.outdir, "pretrain", "setups.tsv"),
-    index=False, sep="\t")
+
 
 order = 7
 ico_verts, ico_tri = icosahedron(order)
