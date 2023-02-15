@@ -42,10 +42,6 @@ parser.add_argument(
     "--setups-file", default="None",
     help="the path to the file linking the setups to the pretrained encoder's path.")
 parser.add_argument(
-    "--evaluate", action="store_true",
-    help="Uses the whole training set to train once, and evaluates on the hold-out test set."
-)
-parser.add_argument(
     "--ico-order", default=6, type=int,
     help="the icosahedron order.")
 args = parser.parse_args()
@@ -95,7 +91,7 @@ def params_from_args(params):
         "cutout", "normalize", "standardize"]
     if not old:
         args_names = [
-            "algo", "data", "ico_order", "n_features", "fusion_level",
+            "algo", "data_train", "ico_order", "n_features", "fusion_level",
             "activation", "batch_norm", "conv_filters",
             "latent_dim", "weight_decay", "epochs", "learning_rate",
             "reduce_lr", "batch_size", "batch_augment",
@@ -195,7 +191,6 @@ for modality in modalities:
 kwargs = {
     "surface-rh": {"metrics": metrics},
     "surface-lh": {"metrics": metrics},
-    "multiblock": {"test_size": 0.2}
 }
 
 if args.data in ["hbn", "euaims"]:
@@ -204,20 +199,20 @@ if args.data in ["hbn", "euaims"]:
 
     modalities.append("clinical")
 
-if args.data == "openbhb":
-    kwargs["multiblock"]["test_size"] = None
 
-n_folds = 5
 
-dataset = DataManager(dataset=args.data, datasetdir=args.datadir,
-                      modalities=modalities, validation=n_folds,
-                      stratify=["sex", "age", "site"], discretize=["age"],
-                      transform=transform, on_the_fly_transform=on_the_fly_transform,
-                      overwrite=False, **kwargs)
+dataset = DataManager(
+    dataset=args.data, datasetdir=args.datadir, modalities=modalities,
+    stratify=["sex", "age", "site"], discretize=["age"],
+    transform=transform, on_the_fly_transform=on_the_fly_transform,
+    overwrite=False, test_size="defaults", **kwargs)
+if args.data_train == args.data:
+    dataset.create_val_from_test(
+        val_size=0.5, stratify=["sex", "age", "site"], discretize=["age"])
 
 
 loader = torch.utils.data.DataLoader(
-    dataset["train"]["all"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
+    dataset["train"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
     shuffle=True)
 
 class TransparentProcessor(object):
@@ -311,102 +306,98 @@ if not os.path.isdir(resdir):
 
 conv_filters = [int(num) for num in args.conv_filters.split("-")]
 
-for fold in range(n_folds):
 
-    train_loader = torch.utils.data.DataLoader(
-        dataset["train"][fold]["train"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-        shuffle=True)
-    valid_loader = torch.utils.data.DataLoader(
-        dataset["train"][fold]["valid"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-        shuffle=True)
-    if args.evaluate:
-        train_loader = torch.utils.data.DataLoader(
-            dataset["train"]["all"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-            shuffle=True)
-        valid_loader = torch.utils.data.DataLoader(
-            dataset["test"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-            shuffle=True)
+train_loader = torch.utils.data.DataLoader(
+    dataset["train"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
+    shuffle=True)
 
-    encoder = SphericalHemiFusionEncoder(
-        n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
-        conv_flts=conv_filters, activation=args.activation,
-        batch_norm=args.batch_norm, conv_mode=args.conv,
-        cachedir=os.path.join(args.outdir, "cached_ico_infos"))
+test_dataset = dataset["test"]
+if args.data_train == args.data:
+    test_dataset = test_dataset["test"]
+test_loader = torch.utils.data.DataLoader(
+    test_dataset, batch_size=args.batch_size, num_workers=6, pin_memory=True,
+    shuffle=True)
 
-    if checkpoint is not None:
-        print("loading encoder")
-        encoder.load_state_dict(checkpoint)
- 
-    
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = encoder.to(device)
+encoder = SphericalHemiFusionEncoder(
+    n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
+    conv_flts=conv_filters, activation=args.activation,
+    batch_norm=args.batch_norm, conv_mode=args.conv,
+    cachedir=os.path.join(args.outdir, "cached_ico_infos"))
+
+if checkpoint is not None:
+    print("loading encoder")
+    encoder.load_state_dict(checkpoint)
+
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+model = encoder.to(device)
    
     # print(model)
     # print("Number of trainable parameters : ",
     #     sum(p.numel() for p in model.parameters() if p.requires_grad))
 
     # Validation
-    model.eval()
-    latents = []
-    transformed_ys = []
-    ys = []
-    for step, x in enumerate(train_loader):
-        x, metadata, _ = x
-        left_x = x["surface-lh"].float().to(device, non_blocking=True)
-        right_x = x["surface-rh"].float().to(device, non_blocking=True)
-        if args.to_predict in metadata.keys():
-            y = metadata[args.to_predict]
-        else:
-            y = x["clinical"][:, index_to_predict]
-        new_y = label_prepro.transform(np.array(y)[:, np.newaxis])
-        transformed_ys.append(new_y)
-        ys.append(y)
-        with torch.cuda.amp.autocast():
-            X = (left_x, right_x)
-            latents.append(model(X).squeeze().detach().cpu().numpy())
-    y = np.concatenate(transformed_ys)
-    real_y = np.concatenate(ys)
-    X = np.concatenate(latents)
-    regressor.fit(X, y)
+model.eval()
+latents = []
+transformed_ys = []
+ys = []
+for step, x in enumerate(train_loader):
+    x, metadata, _ = x
+    left_x = x["surface-lh"].float().to(device, non_blocking=True)
+    right_x = x["surface-rh"].float().to(device, non_blocking=True)
+    if args.to_predict in metadata.keys():
+        y = metadata[args.to_predict]
+    else:
+        y = x["clinical"][:, index_to_predict]
+    new_y = label_prepro.transform(np.array(y)[:, np.newaxis])
+    transformed_ys.append(new_y)
+    ys.append(y)
+    with torch.cuda.amp.autocast():
+        X = (left_x, right_x)
+        latents.append(model(X).squeeze().detach().cpu().numpy())
+y = np.concatenate(transformed_ys)
+real_y = np.concatenate(ys)
+X = np.concatenate(latents)
+regressor.fit(X, y)
 
-    y_hat = regressor.predict(X)
-    real_preds = out_to_real_pred_func(y_hat)
-    for name, metric in evaluation_against_real_metric.items():
-        print(name, metric(real_y, real_preds))
+y_hat = regressor.predict(X)
+real_preds = out_to_real_pred_func(y_hat)
+for name, metric in evaluation_against_real_metric.items():
+    print(name, metric(real_y, real_preds))
 
-    valid_latents = []
-    valid_ys = []
-    valid_transformed_ys = []
-    for step, x in enumerate(valid_loader):
-        x, metadata, _ = x
-        left_x = x["surface-lh"].float().to(device, non_blocking=True)
-        right_x = x["surface-rh"].float().to(device, non_blocking=True)
-        if args.to_predict in metadata.keys():
-            y = metadata[args.to_predict]
-        else:
-            y = x["clinical"][:, index_to_predict]
-        new_y = label_prepro.transform(np.array(y)[:, np.newaxis])
-        valid_ys.append(y)
-        valid_transformed_ys.append(new_y)
-        with torch.cuda.amp.autocast():
-            X = (left_x, right_x)
-            if use_mlp:
-                X = torch.cat(X, dim=1).view((len(left_x), -1))
-            valid_latents.append(model(X).squeeze().detach().cpu().numpy())
-    
-    X_valid = np.concatenate(valid_latents)
-    y_valid = np.concatenate(valid_transformed_ys)
-    real_y_valid = np.concatenate(valid_ys)
+test_latents = []
+test_ys = []
+test_transformed_ys = []
+for step, x in enumerate(test_loader):
+    x, metadata, _ = x
+    left_x = x["surface-lh"].float().to(device, non_blocking=True)
+    right_x = x["surface-rh"].float().to(device, non_blocking=True)
+    if args.to_predict in metadata.keys():
+        y = metadata[args.to_predict]
+    else:
+        y = x["clinical"][:, index_to_predict]
+    new_y = label_prepro.transform(np.array(y)[:, np.newaxis])
+    test_ys.append(y)
+    test_transformed_ys.append(new_y)
+    with torch.cuda.amp.autocast():
+        X = (left_x, right_x)
+        if use_mlp:
+            X = torch.cat(X, dim=1).view((len(left_x), -1))
+        test_latents.append(model(X).squeeze().detach().cpu().numpy())
 
-    y_hat = regressor.predict(X_valid)
+X_test = np.concatenate(test_latents)
+y_test = np.concatenate(test_transformed_ys)
+real_y_test = np.concatenate(test_ys)
 
-    preds = out_to_pred_func(y_hat)
-    real_preds = out_to_real_pred_func(y_hat)
+y_hat = regressor.predict(X_test)
 
-    for name, metric in evaluation_metrics.items():
-        all_metrics[name].append(metric(y_valid, preds))
-    for name, metric in evaluation_against_real_metric.items():
-        all_metrics[name].append(metric(real_y_valid, real_preds))
+preds = out_to_pred_func(y_hat)
+real_preds = out_to_real_pred_func(y_hat)
+
+for name, metric in evaluation_metrics.items():
+    all_metrics[name].append(metric(y_test, preds))
+for name, metric in evaluation_against_real_metric.items():
+    all_metrics[name].append(metric(real_y_test, real_preds))
 
 average_metrics = {}
 std_metrics = {}
@@ -414,55 +405,14 @@ for metric in all_metrics.keys():
     average_metrics[metric] = np.mean(all_metrics[metric])
     std_metrics[metric] = np.std(all_metrics[metric])
 
-if not args.evaluate:
-    groups = {"closeness": ["real_mae", "real_rmse"], "coherence": ["r2", "correlation"]}
-    limit_per_group = {"closeness": (0, 10), "coherence": (0, 1)}
-    for name, group in groups.items():
-        plt.figure()
-        for metric in group:
-            values = average_metrics[metric]
-            plt.plot(range(args.epochs), values, label=metric)
-        plt.title("Average validation metrics")
-        plt.ylim(limit_per_group[name])
-        plt.xlabel("epoch")
-        plt.legend()
-        plt.savefig(os.path.join(
-            resdir,"validation_metrics_{}.png".format(name)))
+final_value_per_metric = {}
+final_std_per_metric = {}
+for metric in ["real_mae", "real_rmse", "r2", "correlation"]:
+    final_value_per_metric[metric] = average_metrics[metric]
+    final_std_per_metric[metric] = std_metrics[metric]
 
-    best_epochs_per_metric = {}
-    best_values_per_metric = {}
-    best_stds_per_metric = {}
-    the_lower_the_better = ["real_mae", "real_rmse"]
-    for metric in ["real_mae", "real_rmse", "r2", "correlation"]:
-        sorted_epochs = np.argsort(average_metrics[metric])
-        sorted_values = np.sort(average_metrics[metric])
-        if metric in the_lower_the_better:
-            best_epochs = sorted_epochs[:5]
-            best_values = sorted_values[:5]
-        else:
-            best_epochs = sorted_epochs[::-1][:5]
-            best_values = sorted_values[::-1][:5]
-        best_epochs_per_metric[metric] = best_epochs.tolist()
-        best_values_per_metric[metric] = best_values.tolist()
-        best_stds_per_metric[metric] = std_metrics[metric][best_epochs].tolist()
+with open(os.path.join(resdir, 'final_values.json'), 'w') as fp:
+    json.dump(final_value_per_metric, fp)
 
-    with open(os.path.join(resdir, 'best_values.json'), 'w') as fp:
-        json.dump(best_values_per_metric, fp)
-
-    with open(os.path.join(resdir, 'best_epochs.json'), 'w') as fp:
-        json.dump(best_epochs_per_metric, fp)
-
-    with open(os.path.join(resdir, 'best_stds.json'), 'w') as fp:
-        json.dump(best_stds_per_metric, fp)
-else:
-    final_value_per_metric = {}
-    final_std_per_metric = {}
-    for metric in ["real_mae", "real_rmse", "r2", "correlation"]:
-        final_value_per_metric[metric] = average_metrics[metric]
-        final_std_per_metric[metric] = std_metrics[metric]
-
-    with open(os.path.join(resdir, 'final_values.json'), 'w') as fp:
-        json.dump(final_value_per_metric, fp)
-    
-    with open(os.path.join(resdir, 'final_stds.json'), 'w') as fp:
-        json.dump(final_std_per_metric, fp)
+with open(os.path.join(resdir, 'final_stds.json'), 'w') as fp:
+    json.dump(final_std_per_metric, fp)
