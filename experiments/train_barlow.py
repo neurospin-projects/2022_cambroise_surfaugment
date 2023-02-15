@@ -375,10 +375,12 @@ for modality in modalities:
 
 dataset_valid = DataManager(
     dataset=args.data, datasetdir=args.datadir,
-    stratify_on=["sex", "age", "site"], discretize=["age"],
+    stratify=["sex", "age", "site"], discretize=["age"],
     modalities=modalities, transform=transform,
     overwrite=False, on_the_fly_transform=valid_on_the_fly_transform,
     test_size=None, **kwargs)
+dataset_valid.create_val_from_test(
+    val_size=0.5, stratify=["sex", "age", "site"], discretize=["age"])
 
 loader = DataLoaderWithBatchAugmentation(
     batch_transforms, dataset["train"], batch_size=args.batch_size,
@@ -390,7 +392,7 @@ train_no_augment_loader = torch.utils.data.DataLoader(
     dataset_valid["train"], batch_size=args.batch_size, num_workers=6,
     pin_memory=True, shuffle=True)
 valid_no_augment_loader = torch.utils.data.DataLoader(
-    dataset_valid["test"], batch_size=args.batch_size, num_workers=6,
+    dataset_valid["test"]["valid"], batch_size=args.batch_size, num_workers=6,
     pin_memory=True, shuffle=True)
 
 # print(len(loader))

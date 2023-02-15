@@ -211,7 +211,7 @@ n_folds = 5
 
 dataset = DataManager(dataset=args.data, datasetdir=args.datadir,
                       modalities=modalities, validation=n_folds,
-                      stratify_on=["sex", "age", "site"], discretize=["age"],
+                      stratify=["sex", "age", "site"], discretize=["age"],
                       transform=transform, on_the_fly_transform=on_the_fly_transform,
                       overwrite=False, **kwargs)
 
