@@ -109,30 +109,6 @@ def transform(x):
     downsampled_data = downsample_data(x, 7 - ico_order, down_indices)
     return np.swapaxes(downsampled_data, 1, 2)
 
-on_the_fly_transform = None
-
-scaling = args.standardize
-scalers = {mod: None for mod in modalities}
-if scaling:
-    for modality in modalities:
-        path_to_scaler = os.path.join(args.datadir, f"{modality}_scaler.save")
-        scaler = joblib.load(path_to_scaler)
-        scalers[modality] =  transforms.Compose([
-            Reshape((1, -1)),
-            scaler.transform,
-            transforms.ToTensor(),
-            torch.squeeze,
-            Reshape(input_shape),
-        ])
-
-on_the_fly_transform = dict()
-for modality in modalities:
-    transformer = Transformer()
-    if args.standardize:
-        transformer.register(scalers[modality])
-    if args.normalize:
-        transformer.register(Normalize())
-    on_the_fly_transform[modality] = transformer
 
 kwargs = {
     "surface-rh": {"metrics": metrics},
@@ -155,27 +131,11 @@ evaluation_metrics = {"mae": mean_absolute_error, "r2": r2_score}
 final_metric = "mae"
 what_is_best = {"mae": "lower", "r2": "higher"}
 
-dataset = DataManager(
-    dataset=args.data, datasetdir=args.datadir, modalities=modalities,
-    stratify=["sex", "age", "site"], discretize=["age"],
-    transform=transform, on_the_fly_transform=on_the_fly_transform,
-    overwrite=False, test_size="defaults", **kwargs)
-dataset.create_val_from_test(
-    val_size=0.5, stratify=["sex", "age", "site"], discretize=["age"])
-
-train_loader = torch.utils.data.DataLoader(
-    dataset["train"], batch_size=batch_size, num_workers=6, pin_memory=True,
-    shuffle=True)
-
-valid_loader = torch.utils.data.DataLoader(
-    dataset["test"]["valid"], batch_size=batch_size, num_workers=6,
-    pin_memory=True, shuffle=True)
-
 
 for setup_id in setups["id"].values:
     params = setups[setups["id"] == setup_id]["args"].values[0]
     cp_name = str(setup_id)
-    if int(args.pretrained_setup) < 10000:
+    if int(setup_id) < 10000:
         cp_name = params
     checkpoints_path = os.path.join(
             "/".join(args.setups_file.split("/")[:-1]),
@@ -192,6 +152,47 @@ for setup_id in setups["id"].values:
         activation=local_args.activation, batch_norm=local_args.batch_norm,
         conv_mode="DiNe",
         cachedir=os.path.join(args.outdir, "cached_ico_infos"))
+    
+    on_the_fly_transform = None
+
+    scaling = local_args.standardize
+    scalers = {mod: None for mod in modalities}
+    if scaling:
+        for modality in modalities:
+            path_to_scaler = os.path.join(args.datadir, f"{modality}_scaler.save")
+            scaler = joblib.load(path_to_scaler)
+            scalers[modality] =  transforms.Compose([
+                Reshape((1, -1)),
+                scaler.transform,
+                transforms.ToTensor(),
+                torch.squeeze,
+                Reshape(input_shape),
+            ])
+
+    on_the_fly_transform = dict()
+    for modality in modalities:
+        transformer = Transformer()
+        if args.standardize:
+            transformer.register(scalers[modality])
+        if args.normalize:
+            transformer.register(Normalize())
+        on_the_fly_transform[modality] = transformer
+
+    dataset = DataManager(
+        dataset=args.data, datasetdir=args.datadir, modalities=modalities,
+        stratify=["sex", "age", "site"], discretize=["age"],
+        transform=transform, on_the_fly_transform=on_the_fly_transform,
+        overwrite=False, test_size="defaults", **kwargs)
+    dataset.create_val_from_test(
+        val_size=0.5, stratify=["sex", "age", "site"], discretize=["age"])
+
+    train_loader = torch.utils.data.DataLoader(
+        dataset["train"], batch_size=batch_size, num_workers=6, pin_memory=True,
+        shuffle=True)
+
+    valid_loader = torch.utils.data.DataLoader(
+        dataset["test"]["valid"], batch_size=batch_size, num_workers=6,
+        pin_memory=True, shuffle=True)
 
     all_metrics = {}
     for name in evaluation_metrics.keys():
