@@ -94,17 +94,19 @@ def params_from_args(params):
 
 setups = pd.read_table(args.setups_file)
 
-input_shape = (len(metrics), len(icosahedron(5)[0]))
+ico_order = 5
+
+input_shape = (len(metrics), len(icosahedron(ico_order)[0]))
 
 order = 7
 ico_verts, _ = icosahedron(order)
 down_indices = []
-for low_order in range(order - 1, args.ico_order - 1, -1):
+for low_order in range(order - 1, ico_order - 1, -1):
     low_ico_verts, _ = icosahedron(low_order)
     down_indices.append(downsample(ico_verts, low_ico_verts))
     ico_verts = low_ico_verts
 def transform(x):
-    downsampled_data = downsample_data(x, 7 - args.ico_order, down_indices)
+    downsampled_data = downsample_data(x, 7 - ico_order, down_indices)
     return np.swapaxes(downsampled_data, 1, 2)
 
 on_the_fly_transform = None
