@@ -94,7 +94,7 @@ def params_from_args(params):
 
 setups = pd.read_table(args.setups_file)
 
-input_shape = (len(metrics), len(icosahedron(args.ico_order)[0]))
+input_shape = (len(metrics), len(icosahedron(5)[0]))
 
 order = 7
 ico_verts, _ = icosahedron(order)
@@ -195,7 +195,7 @@ for setup_id in setups["id"].values:
     for name in evaluation_metrics.keys():
         all_metrics[name] = []
     path_to_metrics = os.path.join(checkpoints_path, "validation_metrics.json")
-    if os.path.exists(path_to_metrics):
+    if os.path.exists(path_to_metrics) or local_args.ico_order != 5:
         continue
 
     epochs = []
@@ -273,10 +273,9 @@ for setup_id in setups["id"].values:
             [f"best {name} : {value}" for name, value in best_value_per_metric]))
 
     if is_finished:
-        setups = pd.read_table(os.path.join(args.outdir, "pretrain", "setups.tsv"))
+        setups = pd.read_table(args.setups_file)
         setups.loc[setups["id"] == setup_id, "best_epoch"] = (
             best_epoch_per_metric[final_metric])
-        setups.to_csv(os.path.join(args.outdir, "pretrain", "setups.tsv"),
-            index=False, sep="\t")
+        setups.to_csv(args.setups_file, index=False, sep="\t")
         with open(path_to_metrics) as fp:
             json.dump(all_metrics, fp)

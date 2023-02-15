@@ -36,10 +36,10 @@ parser.add_argument(
     "--method", default="regression", choices=("regression", "classification"),
     help="the prediction method.")
 parser.add_argument(
-    "--pretrained-setup", default="None",
+    "--pretrained-setup", default="None", required=True,
     help="the pretrained encoder's id.")
 parser.add_argument(
-    "--setups-file", default="None",
+    "--setups-file", default="None", required=True,
     help="the path to the file linking the setups to the pretrained encoder's path.")
 parser.add_argument(
     "--ico-order", default=6, type=int,
@@ -125,19 +125,6 @@ if args.pretrained_setup != "None":
     checkpoint = torch.load(pretrained_path)
     if epoch != max_epoch:
         checkpoint = encoder_cp_from_model_cp(checkpoint)
-else:
-    args.n_features = len(metrics)
-    args.fusion_level = 1
-    args.activation = "ReLU"
-    args.standardize = True
-    args.normalize = False
-    args.batch_norm = False
-    args.conv_filters = "64-128-128-256-256"
-    args.latent_dim = 64
-    args.blur = False
-    args.cutout = False
-    args.noise = False
-    args.ico_order = 6
 args.batch_size = 32
 
 print(args)
