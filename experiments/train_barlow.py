@@ -616,7 +616,7 @@ plt.savefig(os.path.join(
 
 idx_epoch = epoch-args.start_epoch
 last_average_valid_perfs = np.mean(valid_perfs[max((idx_epoch - args.save_freq + 1), 0):idx_epoch + 1])
-if last_average_valid_perfs < best_average_perf:
+if last_average_valid_perfs < best_valid_perf:
     setups = pd.read_table(os.path.join(args.outdir, "pretrain", "setups.tsv"))
     setups.loc[setups["id"] == run_id, "best_epoch"] = epoch
     setups.to_csv(os.path.join(args.outdir, "pretrain", "setups.tsv"),
