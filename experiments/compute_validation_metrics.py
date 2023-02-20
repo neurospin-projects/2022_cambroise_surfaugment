@@ -135,11 +135,12 @@ what_is_best = {"mae": "lower", "r2": "higher"}
 for setup_id in setups["id"].values:
     params = setups[setups["id"] == setup_id]["args"].values[0]
     cp_name = str(setup_id)
+    checkpoints_path = os.path.join(
+        "/".join(args.setups_file.split("/")[:-1]),
+        "checkpoints", cp_name)
     if int(setup_id) < 10000:
         cp_name = params
-    checkpoints_path = os.path.join(
-            "/".join(args.setups_file.split("/")[:-1]),
-            "checkpoints", cp_name)
+        checkpoints_path = "/".join(cp_name.split("/")[:-1])
     local_args = params_from_args(params)
     conv_filters = [int(num) for num in local_args.conv_filters.split("-")]
 
@@ -187,8 +188,8 @@ for setup_id in setups["id"].values:
         val_size=0.5, stratify=["sex", "age", "site"], discretize=["age"])
 
     train_loader = torch.utils.data.DataLoader(
-        dataset["train"], batch_size=batch_size, num_workers=6, pin_memory=True,
-        shuffle=True)
+        dataset["train"], batch_size=batch_size, num_workers=6,
+        pin_memory=True, shuffle=True)
 
     valid_loader = torch.utils.data.DataLoader(
         dataset["test"]["valid"], batch_size=batch_size, num_workers=6,
@@ -198,18 +199,21 @@ for setup_id in setups["id"].values:
     for name in evaluation_metrics.keys():
         all_metrics[name] = []
     path_to_metrics = os.path.join(checkpoints_path, "validation_metrics.json")
-    if os.path.exists(path_to_metrics) or local_args.ico_order != 5:
+
+    if (local_args.ico_order != 5 or os.path.exists(path_to_metrics)
+        or not os.path.exists(checkpoints_path)):
         continue
 
     epochs = []
     is_finished = False
-    for checkpoint in tqdm(os.listdir(checkpoints_path)):
-        full_path = os.path.join(checkpoints_path, checkpoint)
-        if not (os.isfile(full_path) and full_path.endswith("pth")):
+    print(checkpoints_path)
+    for file in tqdm(os.listdir(checkpoints_path)):
+        full_path = os.path.join(checkpoints_path, file)
+        if not (os.path.isfile(full_path) and file.endswith("pth") and "model" in file):
             continue
         checkpoint = torch.load(full_path)
         checkpoint = encoder_cp_from_model_cp(checkpoint)
-        epoch = int(checkpoint.split(".pth")[0].split("_")[-1])
+        epoch = int(file.split(".pth")[0].split("_")[-1])
         if epoch == local_args.epochs:
             is_finished = True
         epochs.append(epoch)
@@ -234,10 +238,6 @@ for setup_id in setups["id"].values:
         y = np.concatenate(ys)
         X = np.concatenate(latents)
         regressor.fit(X, y)
-
-        y_hat = regressor.predict(X)
-        for name, metric in evaluation_metrics.items():
-            print(name, metric(y, y_hat))
 
         valid_latents = []
         valid_ys = []
@@ -272,13 +272,13 @@ for setup_id in setups["id"].values:
             best_value = all_metrics[name][sorted_indices[best_index]]
             best_epoch_per_metric[name] = best_epoch
             best_value_per_metric[name] = best_value
-        print(", ".join(
-            [f"best {name} : {value}" for name, value in best_value_per_metric]))
-
+        print(str(setup_id) + ",".join([f" best {name} : {value}"
+              for name, value in best_value_per_metric.items()]))
+    all_metrics["epochs"] = epochs
     if is_finished:
         setups = pd.read_table(args.setups_file)
         setups.loc[setups["id"] == setup_id, "best_epoch"] = (
             best_epoch_per_metric[final_metric])
         setups.to_csv(args.setups_file, index=False, sep="\t")
-        with open(path_to_metrics) as fp:
+        with open(path_to_metrics, 'w') as fp:
             json.dump(all_metrics, fp)

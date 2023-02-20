@@ -444,7 +444,7 @@ threshold_valid_loss = 1000
 start_time = time.time()
 scaler = torch.cuda.amp.GradScaler()
 best_saved_epoch = args.start_epoch
-best_average_perf = 10000 if len(valid_perfs) == 0 else valid_perfs[0]
+best_valid_perf = 10000 if len(valid_perfs) == 0 else valid_perfs[0]
 for epoch in range(start_epoch, args.epochs + 1):
     stats = dict(epoch=epoch, lr=optimizer.param_groups[0]['lr'],
                  loss=0, valid_loss=0)
@@ -579,11 +579,10 @@ for epoch in range(start_epoch, args.epochs + 1):
             }, checkpoint_path.format(epoch))
         if epoch != args.start_epoch:
             idx_epoch = epoch-args.start_epoch
-            last_average_valid_perfs = np.mean(
-                valid_perfs[(idx_epoch - args.save_freq + 1):idx_epoch + 1])
-            if last_average_valid_perfs < best_average_perf:
+            last_valid_perfs = valid_perfs[idx_epoch]
+            if last_valid_perfs < best_valid_perf:
                 best_saved_epoch = epoch
-                best_average_perf = last_average_valid_perfs
+                best_valid_perf = last_valid_perfs
                 setups = pd.read_table(os.path.join(args.outdir, "pretrain", "setups.tsv"))
                 setups.loc[setups["id"] == run_id, "best_epoch"] = best_saved_epoch
                 setups.to_csv(os.path.join(args.outdir, "pretrain", "setups.tsv"),
@@ -593,21 +592,27 @@ for epoch in range(start_epoch, args.epochs + 1):
     if args.reduce_lr:
         scheduler.step()
 
-plt.plot(range(args.start_epoch, args.epochs + 1), losses, label="training")
-plt.plot(range(args.start_epoch, args.epochs + 1), valid_losses, label="validation")
+plt.plot(range(args.start_epoch, args.epochs + 1), losses,
+         label="training")
+plt.plot(range(args.start_epoch, args.epochs + 1), valid_losses,
+         label="validation")
 plt.legend()
 plt.title("Loss during training")
 plt.xlabel("Epoch")
 plt.ylabel("Loss")
-plt.savefig(os.path.join(checkpoint_dir, "losses.pdf"))
+plt.savefig(os.path.join(
+    checkpoint_dir, f"losses_from_{args.start_epoch}_to_{args.epochs}.pdf"))
 
+plt.figure()
 plt.plot(range(args.start_epoch, args.epochs + 1), perfs, label="training")
-plt.plot(range(args.start_epoch, args.epochs + 1), valid_perfs, label="validation")
+plt.plot(range(args.start_epoch, args.epochs + 1), valid_perfs,
+         label="validation")
 plt.legend()
 plt.title("Performance during training")
 plt.xlabel("Epoch")
 plt.ylabel(metric_for_perf)
-plt.savefig(os.path.join(checkpoint_dir, "perfs.pdf"))
+plt.savefig(os.path.join(
+    checkpoint_dir, f"perfs_from_{args.start_epoch}_to_{args.epochs}.pdf"))
 
 idx_epoch = epoch-args.start_epoch
 last_average_valid_perfs = np.mean(valid_perfs[max((idx_epoch - args.save_freq + 1), 0):idx_epoch + 1])

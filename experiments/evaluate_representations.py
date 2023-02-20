@@ -36,16 +36,14 @@ parser.add_argument(
     "--method", default="regression", choices=("regression", "classification"),
     help="the prediction method.")
 parser.add_argument(
-    "--pretrained-setup", default="None", required=True,
+    "--pretrained-setup", default="None",
     help="the pretrained encoder's id.")
 parser.add_argument(
     "--setups-file", default="None", required=True,
     help="the path to the file linking the setups to the pretrained encoder's path.")
-parser.add_argument(
-    "--ico-order", default=6, type=int,
-    help="the icosahedron order.")
 args = parser.parse_args()
 args.conv = "DiNe"
+args.ico_order = 5
 
 # Prepare process
 setup_logging(level="info", logfile=None)
@@ -59,7 +57,10 @@ print(" ".join(sys.argv), file=stats_file)
 # Load the input cortical data
 modalities = ["surface-lh", "surface-rh"]
 metrics = ["thickness", "curv", "sulc"]
+n_features = len(metrics)
 transform = None
+batch_size = 32
+
 
 def encoder_cp_from_model_cp(checkpoint):
     name_to_check = "backbone"
@@ -87,7 +88,7 @@ def params_from_args(params):
         "data_train", "n_features", "fusion_level", "activation",
         "batch_norm", "conv_filters", "latent_dim",
         "weight_decay", "epochs", "learning_rate", "batch_size",
-        "batch_augment", "inter_modal_augment", "gaussian_blur_augment",
+        "batch_augment", "inter_modal_augment", "blur",
         "cutout", "normalize", "standardize"]
     if not old:
         args_names = [
@@ -99,40 +100,116 @@ def params_from_args(params):
             "normalize", "standardize", "loss_param", "sigma"]
     for idx, value in enumerate(parsed.fixed):
         if value.isdigit():
-            value = float(value)
-            value = int(value) if int(value) == value else value
-        elif value in ["True", "False"]:
+            value = int(value)
+        else:
+            try:
+                value = float(value)
+            except ValueError:
+                pass
+        if value in ["True", "False"]:
             value = value == "True"
         setattr(args, args_names[idx], value)
     return args
 
-checkpoint = None
+def matching_args_to_case(args, cases):
+    relation_mapper = {
+        "gt": lambda x, y: x > y,
+        "lt": lambda x, y: x < y,
+        "gte": lambda x, y: x >= y,
+        "lte": lambda x, y: x <= y,
+        "eq": lambda x, y: x == y,
+        "in": lambda x, y: x.isin(y),
+        "out": lambda x, y: ~x.isin(y),
+    }
+    for case, case_args in cases.items():
+        matches = True
+        for arg_name, value in case_args.items():
+            if not type(value) is list:
+                value = ["eq", value]
+            if not relation_mapper[value[0]](getattr(args, arg_name), value[1]):
+                matches = False
+        if matches:
+            return case
+    return None
+
+setups = pd.read_table(args.setups_file)
 if args.pretrained_setup != "None":
-    assert args.setups_file != "None"
-    setups = pd.read_table(args.setups_file)
     params, epoch = setups[setups["id"] == int(args.pretrained_setup)][["args", "best_epoch"]].values[0]
     pretrained_path = os.path.join(
             "/".join(args.setups_file.split("/")[:-1]),
             "checkpoints", args.pretrained_setup,
-            "encoder.pth")
+            "model_epoch_{}.pth".format(int(epoch)))
     if int(args.pretrained_setup) < 10000:
         pretrained_path = params
-    args = params_from_args(params)
-    max_epoch = int(params.split("_epochs")[0].split("_")[-1])
-    if epoch != max_epoch:
         pretrained_path = pretrained_path.replace(
             "encoder.pth", "model_epoch_{}.pth".format(int(epoch)))
+    args = params_from_args(params)
+    
     checkpoint = torch.load(pretrained_path)
-    if epoch != max_epoch:
-        checkpoint = encoder_cp_from_model_cp(checkpoint)
-args.batch_size = 32
+    checkpoint = encoder_cp_from_model_cp(checkpoint)
+    checkpoints = [checkpoint]
+    setup_ids = [int(args.pretrained_setup)]
+else:
+    validation_metric = "mae"
+    best_is_low = True
+    cases = dict(
+        a={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": True,
+           "noise": True, "sigma": 0},
+        b={"algo": "simCLR", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
+           "blur": True, "noise": True, "sigma": 0},
+        c={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
+           "blur": True, "noise": True, "sigma": 0},
+        d={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": True,
+           "noise": True},
+        e={"algo": "barlow", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
+           "blur": True, "noise": True},
+        f={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
+           "blur": True, "noise": True})
+    best_cp_per_case = dict()
+    for setup_id in setups["id"].values:
+        params, epoch = setups[setups["id"] == setup_id][["args", "best_epoch"]].values[0]
+        local_args = params_from_args(params)
+        if not hasattr(local_args, "algo"):
+            local_args.algo = "barlow"
+        if not hasattr(local_args, "sigma"):
+            local_args.sigma = 0
+        if not hasattr(local_args, "noise"):
+            local_args.noise = False
+        case = matching_args_to_case(local_args, cases)
+        if case is not None and epoch > 0 and local_args.ico_order == 5:
+            pretrained_path = os.path.join(
+                "/".join(args.setups_file.split("/")[:-1]),
+                "checkpoints", str(setup_id),
+                "model_epoch_{}.pth".format(int(epoch)))
+            if int(setup_id) < 10000:
+                pretrained_path = params
+                pretrained_path = pretrained_path.replace(
+                    "encoder.pth", "model_epoch_{}.pth".format(int(epoch)))            
+            checkpoint = torch.load(pretrained_path)
+            checkpoint = encoder_cp_from_model_cp(checkpoint)
+            validation_metrics_path = os.path.join(
+                "/".join(pretrained_path.split("/")[:-1]),
+                "validation_metrics.json")
+            if os.path.exists(validation_metrics_path):
+                with open(validation_metrics_path, "r") as f:
+                    validation_metrics = json.load(f)
+                best_metric = validation_metrics[validation_metric][
+                    validation_metrics["epochs"].index(epoch)]
+                if case not in best_cp_per_case.keys():
+                    best_cp_per_case[case] = (
+                        setup_id, checkpoint, best_metric)
+                if ((best_cp_per_case[case][2] > best_metric and best_is_low)
+                    or (best_cp_per_case[case][2] < best_metric and
+                        not best_is_low)):
+                    best_cp_per_case[case] = (
+                        setup_id, checkpoint, best_metric)
+    checkpoints = [best_cp_per_case[case][1] for case in cases.keys()
+                   if case in best_cp_per_case.keys()]
+    setup_ids = [best_cp_per_case[case][0] for case in cases.keys()
+                 if case in best_cp_per_case.keys()]
+    cases_names = [case for case in cases.keys() if case in best_cp_per_case.keys()]
 
-print(args)
-
-use_mlp = False
-if use_mlp:
-    input_size = 2 * len(metrics) * len(icosahedron(args.ico_order)[0])
-
+print(setup_ids)
 input_shape = (len(metrics), len(icosahedron(args.ico_order)[0]))
 
 order = 7
@@ -146,35 +223,6 @@ def transform(x):
     downsampled_data = downsample_data(x, 7 - args.ico_order, down_indices)
     return np.swapaxes(downsampled_data, 1, 2)
 
-
-on_the_fly_transform = None
-
-scaling = args.standardize
-scalers = {mod: None for mod in modalities}
-if scaling:
-    for modality in modalities:
-        path_to_scaler = os.path.join(args.datadir, f"{modality}_scaler.save")
-        scaler = joblib.load(path_to_scaler)
-        scalers[modality] =  transforms.Compose([
-            Reshape((1, -1)),
-            scaler.transform,
-            transforms.ToTensor(),
-            torch.squeeze,
-            Reshape(input_shape),
-        ])
-
-on_the_fly_transform = dict()
-for modality in modalities:
-    transformer = Transformer()
-    if args.standardize:
-        transformer.register(scalers[modality])
-    if args.normalize:
-        transformer.register(Normalize())
-    on_the_fly_transform[modality] = transformer
-
-
-# downsampler = wrapper_data_downsampler(args.outdir, to_order=args.ico_order)
-
 kwargs = {
     "surface-rh": {"metrics": metrics},
     "surface-lh": {"metrics": metrics},
@@ -187,11 +235,9 @@ if args.data in ["hbn", "euaims"]:
     modalities.append("clinical")
 
 
-
 dataset = DataManager(
     dataset=args.data, datasetdir=args.datadir, modalities=modalities,
     stratify=["sex", "age", "site"], discretize=["age"],
-    transform=transform, on_the_fly_transform=on_the_fly_transform,
     overwrite=False, test_size="defaults", **kwargs)
 if args.data_train == args.data:
     dataset.create_val_from_test(
@@ -199,7 +245,7 @@ if args.data_train == args.data:
 
 
 loader = torch.utils.data.DataLoader(
-    dataset["train"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
+    dataset["train"], batch_size=batch_size, num_workers=6, pin_memory=True,
     shuffle=True)
 
 class TransparentProcessor(object):
@@ -273,133 +319,163 @@ else:
     out_to_pred_func = lambda x: x.argmax(1).cpu().detach().numpy()
     regressor = LogisticRegression()
 
-im_shape = next(iter(loader))[0]["surface-lh"][0].shape
-n_features = im_shape[0]
+for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
+    print(f"Best setup for case {cases_names[case_id]} : {setup_id}")
+    params = setups[setups["id"] == setup_id]["args"].values[0]
+    local_args = params_from_args(params)
 
+    conv_filters = [int(num) for num in local_args.conv_filters.split("-")]
 
-all_metrics = {}
-for name in evaluation_metrics.keys():
-    all_metrics[name] = []
-for name in evaluation_against_real_metric.keys():
-    all_metrics[name] = []
+    if not hasattr(local_args, "ico_order"):
+        local_args.ico_order = len(conv_filters) + 1
 
-run_name = ("deepint_evaluate_representations_to_predict_{}_{}_predict_via_{}"
-            "_pretrained_{}").format(
-                args.data, args.to_predict, args.method, args.pretrained_setup)
+    encoder = SphericalHemiFusionEncoder(
+        n_features, local_args.ico_order, local_args.latent_dim,
+        fusion_level=local_args.fusion_level, conv_flts=conv_filters,
+        activation=local_args.activation, batch_norm=local_args.batch_norm,
+        conv_mode="DiNe",
+        cachedir=os.path.join(args.outdir, "cached_ico_infos"))
+    
+    on_the_fly_transform = None
 
-resdir = os.path.join(resdir, run_name)
-if not os.path.isdir(resdir):
-    os.makedirs(resdir)
+    scaling = local_args.standardize
+    scalers = {mod: None for mod in modalities}
+    if scaling:
+        for modality in modalities:
+            path_to_scaler = os.path.join(args.datadir, f"{modality}_scaler.save")
+            scaler = joblib.load(path_to_scaler)
+            scalers[modality] =  transforms.Compose([
+                Reshape((1, -1)),
+                scaler.transform,
+                transforms.ToTensor(),
+                torch.squeeze,
+                Reshape(input_shape),
+            ])
 
-conv_filters = [int(num) for num in args.conv_filters.split("-")]
+    on_the_fly_transform = dict()
+    for modality in modalities:
+        transformer = Transformer()
+        if args.standardize:
+            transformer.register(scalers[modality])
+        if args.normalize:
+            transformer.register(Normalize())
+        on_the_fly_transform[modality] = transformer
 
+    dataset = DataManager(
+        dataset=args.data, datasetdir=args.datadir, modalities=modalities,
+        stratify=["sex", "age", "site"], discretize=["age"],
+        transform=transform, on_the_fly_transform=on_the_fly_transform,
+        overwrite=False, test_size="defaults", **kwargs)
+    if args.data_train == args.data:
+        dataset.create_val_from_test(
+            val_size=0.5, stratify=["sex", "age", "site"], discretize=["age"])
+    all_metrics = {}
+    for name in evaluation_metrics.keys():
+        all_metrics[name] = []
+    for name in evaluation_against_real_metric.keys():
+        all_metrics[name] = []
 
-train_loader = torch.utils.data.DataLoader(
-    dataset["train"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-    shuffle=True)
+    run_name = (
+        "deepint_evaluate_representations_to_predict_{}_{}_predict_via_{}"
+        "_pretrained_{}_case_{}").format(
+            args.data, args.to_predict, args.method, setup_id,
+            None if args.pretrained_setup != "None" else list(cases)[case_id])
 
-test_dataset = dataset["test"]
-if args.data_train == args.data:
-    test_dataset = test_dataset["test"]
-test_loader = torch.utils.data.DataLoader(
-    test_dataset, batch_size=args.batch_size, num_workers=6, pin_memory=True,
-    shuffle=True)
+    resdir = os.path.join(resdir, run_name)
+    if not os.path.isdir(resdir):
+        os.makedirs(resdir)
 
-encoder = SphericalHemiFusionEncoder(
-    n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
-    conv_flts=conv_filters, activation=args.activation,
-    batch_norm=args.batch_norm, conv_mode=args.conv,
-    cachedir=os.path.join(args.outdir, "cached_ico_infos"))
+    train_loader = torch.utils.data.DataLoader(
+        dataset["train"], batch_size=batch_size, num_workers=6, pin_memory=True,
+        shuffle=True)
 
-if checkpoint is not None:
-    print("loading encoder")
+    test_dataset = dataset["test"]
+    if args.data_train == args.data:
+        test_dataset = test_dataset["test"]
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset, batch_size=batch_size, num_workers=6, pin_memory=True,
+        shuffle=True)
+
     encoder.load_state_dict(checkpoint)
 
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = encoder.to(device)
-   
-    # print(model)
-    # print("Number of trainable parameters : ",
-    #     sum(p.numel() for p in model.parameters() if p.requires_grad))
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = encoder.to(device)
 
-    # Validation
-model.eval()
-latents = []
-transformed_ys = []
-ys = []
-for step, x in enumerate(train_loader):
-    x, metadata, _ = x
-    left_x = x["surface-lh"].float().to(device, non_blocking=True)
-    right_x = x["surface-rh"].float().to(device, non_blocking=True)
-    if args.to_predict in metadata.keys():
-        y = metadata[args.to_predict]
-    else:
-        y = x["clinical"][:, index_to_predict]
-    new_y = label_prepro.transform(np.array(y)[:, np.newaxis])
-    transformed_ys.append(new_y)
-    ys.append(y)
-    with torch.cuda.amp.autocast():
-        X = (left_x, right_x)
-        latents.append(model(X).squeeze().detach().cpu().numpy())
-y = np.concatenate(transformed_ys)
-real_y = np.concatenate(ys)
-X = np.concatenate(latents)
-regressor.fit(X, y)
+    model.eval()
+    latents = []
+    transformed_ys = []
+    ys = []
+    for step, x in enumerate(train_loader):
+        x, metadata, _ = x
+        left_x = x["surface-lh"].float().to(device, non_blocking=True)
+        right_x = x["surface-rh"].float().to(device, non_blocking=True)
+        if args.to_predict in metadata.keys():
+            y = metadata[args.to_predict]
+        else:
+            y = x["clinical"][:, index_to_predict]
+        new_y = label_prepro.transform(np.array(y)[:, np.newaxis])
+        transformed_ys.append(new_y)
+        ys.append(y)
+        with torch.cuda.amp.autocast():
+            X = (left_x, right_x)
+            latents.append(model(X).squeeze().detach().cpu().numpy())
+    y = np.concatenate(transformed_ys)
+    real_y = np.concatenate(ys)
+    X = np.concatenate(latents)
+    regressor.fit(X, y)
 
-y_hat = regressor.predict(X)
-real_preds = out_to_real_pred_func(y_hat)
-for name, metric in evaluation_against_real_metric.items():
-    print(name, metric(real_y, real_preds))
+    y_hat = regressor.predict(X)
+    real_preds = out_to_real_pred_func(y_hat)
+    # for name, metric in evaluation_against_real_metric.items():
+    #     print(name, metric(real_y, real_preds))
 
-test_latents = []
-test_ys = []
-test_transformed_ys = []
-for step, x in enumerate(test_loader):
-    x, metadata, _ = x
-    left_x = x["surface-lh"].float().to(device, non_blocking=True)
-    right_x = x["surface-rh"].float().to(device, non_blocking=True)
-    if args.to_predict in metadata.keys():
-        y = metadata[args.to_predict]
-    else:
-        y = x["clinical"][:, index_to_predict]
-    new_y = label_prepro.transform(np.array(y)[:, np.newaxis])
-    test_ys.append(y)
-    test_transformed_ys.append(new_y)
-    with torch.cuda.amp.autocast():
-        X = (left_x, right_x)
-        if use_mlp:
-            X = torch.cat(X, dim=1).view((len(left_x), -1))
-        test_latents.append(model(X).squeeze().detach().cpu().numpy())
+    test_latents = []
+    test_ys = []
+    test_transformed_ys = []
+    for step, x in enumerate(test_loader):
+        x, metadata, _ = x
+        left_x = x["surface-lh"].float().to(device, non_blocking=True)
+        right_x = x["surface-rh"].float().to(device, non_blocking=True)
+        if args.to_predict in metadata.keys():
+            y = metadata[args.to_predict]
+        else:
+            y = x["clinical"][:, index_to_predict]
+        new_y = label_prepro.transform(np.array(y)[:, np.newaxis])
+        test_ys.append(y)
+        test_transformed_ys.append(new_y)
+        with torch.cuda.amp.autocast():
+            X = (left_x, right_x)
+            test_latents.append(model(X).squeeze().detach().cpu().numpy())
 
-X_test = np.concatenate(test_latents)
-y_test = np.concatenate(test_transformed_ys)
-real_y_test = np.concatenate(test_ys)
+    X_test = np.concatenate(test_latents)
+    y_test = np.concatenate(test_transformed_ys)
+    real_y_test = np.concatenate(test_ys)
 
-y_hat = regressor.predict(X_test)
+    y_hat = regressor.predict(X_test)
 
-preds = out_to_pred_func(y_hat)
-real_preds = out_to_real_pred_func(y_hat)
+    preds = out_to_pred_func(y_hat)
+    real_preds = out_to_real_pred_func(y_hat)
 
-for name, metric in evaluation_metrics.items():
-    all_metrics[name].append(metric(y_test, preds))
-for name, metric in evaluation_against_real_metric.items():
-    all_metrics[name].append(metric(real_y_test, real_preds))
+    for name, metric in evaluation_metrics.items():
+        all_metrics[name].append(metric(y_test, preds))
+    for name, metric in evaluation_against_real_metric.items():
+        all_metrics[name].append(metric(real_y_test, real_preds))
 
-average_metrics = {}
-std_metrics = {}
-for metric in all_metrics.keys():
-    average_metrics[metric] = np.mean(all_metrics[metric])
-    std_metrics[metric] = np.std(all_metrics[metric])
+    average_metrics = {}
+    std_metrics = {}
+    for metric in all_metrics.keys():
+        average_metrics[metric] = np.mean(all_metrics[metric])
+        std_metrics[metric] = np.std(all_metrics[metric])
 
-final_value_per_metric = {}
-final_std_per_metric = {}
-for metric in ["real_mae", "real_rmse", "r2", "correlation"]:
-    final_value_per_metric[metric] = average_metrics[metric]
-    final_std_per_metric[metric] = std_metrics[metric]
+    final_value_per_metric = {}
+    final_std_per_metric = {}
+    for metric in ["real_mae", "real_rmse", "r2", "correlation"]:
+        final_value_per_metric[metric] = average_metrics[metric]
+        final_std_per_metric[metric] = std_metrics[metric]
+    print(final_value_per_metric["real_mae"])
+    with open(os.path.join(resdir, 'final_values.json'), 'w') as fp:
+        json.dump(final_value_per_metric, fp)
 
-with open(os.path.join(resdir, 'final_values.json'), 'w') as fp:
-    json.dump(final_value_per_metric, fp)
-
-with open(os.path.join(resdir, 'final_stds.json'), 'w') as fp:
-    json.dump(final_std_per_metric, fp)
+    with open(os.path.join(resdir, 'final_stds.json'), 'w') as fp:
+        json.dump(final_std_per_metric, fp)
