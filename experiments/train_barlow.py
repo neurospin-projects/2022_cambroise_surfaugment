@@ -8,11 +8,12 @@ import joblib
 import numpy as np
 from matplotlib import pyplot as plt
 from sklearn.decomposition import PCA
-from sklearn.metrics import r2_score, mean_absolute_error, accuracy_score
+from sklearn.metrics import r2_score, mean_absolute_error, accuracy_score, balanced_accuracy_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsRegressor
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import Ridge, LogisticRegression
 import pandas as pd
+from neurocombat_sklearn import CombatModel
 
 import torch
 from torch import nn, optim
@@ -241,18 +242,33 @@ if args.batch_augment > 0 or args.standardize:
         path_to_scaler = os.path.join(args.datadir, f"{modality}_scaler.save")
         if not os.path.exists(path_to_scaler) or args.batch_augment > 0 or overwrite:
             regressor = KNeighborsRegressor(n_neighbors=30)
-            X, Y = [], []
-            X_valid, Y_valid = [], []
+            residualizer = CombatModel()
+            check_site_biasor = LogisticRegression()
+            X, Y, sites, sex = [], [], [], []
+            X_valid, Y_valid, sites_valid, sex_valid = [], [], [], []
             shape = None
             for x in loader:
                 x, metadata, _ = x
                 X += x[modality].view((len(x[modality]), -1)).tolist()
                 Y += metadata["age"].tolist()
+                sites += metadata["site"].tolist()
+                sex += metadata["sex"]
     
             for x in valid_loader:
                 x, metadata, _ = x
                 X_valid += x[modality].view((len(x[modality]), -1)).tolist()
                 Y_valid += metadata["age"].tolist()
+                sites_valid += metadata["site"].tolist()
+                sex_valid += metadata["sex"]
+            
+            X = np.asarray(X)
+            X_valid = np.asarray(X_valid)
+            Y = np.asarray(Y)
+            Y_valid = np.asarray(Y_valid)
+            sites = np.asarray(sites)
+            sites_valid = np.asarray(sites_valid)
+            sex = np.asarray(sex)
+            sex_valid = np.asarray(sex_valid)
             
             if not os.path.exists(path_to_scaler) or overwrite:
                 print("Fit scaler")
@@ -276,6 +292,15 @@ if args.batch_augment > 0 or args.standardize:
             X_valid = scaler.transform(X_valid)
             print("Scaled")
 
+            print("Residualizing")
+            zero_mask = (X == 0).sum(0) == len(X)
+            X[:, ~zero_mask] = residualizer.fit_transform(
+                X[:, ~zero_mask], sites[:, None], sex[:, None], Y[:, None])
+            X_valid[:, ~zero_mask] = residualizer.transform(
+                X_valid[:, ~zero_mask], sites_valid[:, None],
+                sex_valid[:, None], Y_valid[:, None])
+            print("Residualized")
+
             print("Reducting")
             reductor = PCA(20)
             X = reductor.fit_transform(X)
@@ -283,6 +308,12 @@ if args.batch_augment > 0 or args.standardize:
             print("Reducted")
 
             regressor.fit(X, Y)
+            check_site_biasor.fit(X, sites)
+            sites_hat = check_site_biasor.predict(X)
+            sites_valid_hat = check_site_biasor.predict(X_valid)
+
+            print(balanced_accuracy_score(sites, sites_hat))
+            print(balanced_accuracy_score(sites_valid, sites_valid_hat))
             # print(mean_absolute_error(Y, regressor.predict(X)))
             # print(mean_absolute_error(Y_valid, regressor.predict(X_valid)))
             # print(r2_score(Y, regressor.predict(X)))

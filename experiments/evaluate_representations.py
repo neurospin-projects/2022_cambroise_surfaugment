@@ -152,19 +152,22 @@ if args.pretrained_setup != "None":
 else:
     validation_metric = "mae"
     best_is_low = True
-    cases = dict(
-        a={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": True,
-           "noise": True, "sigma": 0},
-        b={"algo": "simCLR", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
-           "blur": True, "noise": True, "sigma": 0},
-        c={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
-           "blur": True, "noise": True, "sigma": 0},
-        d={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": True,
-           "noise": True},
-        e={"algo": "barlow", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
-           "blur": True, "noise": True},
-        f={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
-           "blur": True, "noise": True})
+    def cases(latent_dim=128):
+        cases = dict(
+            a={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": True,
+            "noise": True, "sigma": 0, "latent_dim": latent_dim},
+            b={"algo": "simCLR", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
+            "blur": True, "noise": True, "sigma": 0, "latent_dim": latent_dim},
+            c={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
+            "blur": True, "noise": True, "sigma": 0, "latent_dim": latent_dim},
+            d={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": True,
+            "noise": True, "latent_dim": latent_dim},
+            e={"algo": "barlow", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
+            "blur": True, "noise": True, "latent_dim": latent_dim},
+            f={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
+            "blur": True, "noise": True, "latent_dim": latent_dim})
+        return cases
+    cases = cases(128)
     best_cp_per_case = dict()
     for setup_id in setups["id"].values:
         params, epoch = setups[setups["id"] == setup_id][["args", "best_epoch"]].values[0]
@@ -234,14 +237,16 @@ if args.data in ["hbn", "euaims"]:
 
     modalities.append("clinical")
 
+test_size = "defaults"
+if args.data != "openbhb" and args.to_predict != "age":
+    test_size = 0.2
+
 
 dataset = DataManager(
     dataset=args.data, datasetdir=args.datadir, modalities=modalities,
     stratify=["sex", "age", "site"], discretize=["age"],
-    overwrite=False, test_size="defaults", **kwargs)
-if args.data_train == args.data:
-    dataset.create_val_from_test(
-        val_size=0.5, stratify=["sex", "age", "site"], discretize=["age"])
+    transform=transform, overwrite=False, test_size=test_size,
+    **kwargs)
 
 
 loader = torch.utils.data.DataLoader(
@@ -263,9 +268,10 @@ class TransparentProcessor(object):
 
 all_label_data = []
 if "clinical" in modalities:
-    clinical_names = np.load(os.path.join(args.datadir, "clinical_names.npy"), allow_pickle=True)
-    # print(clinical_names)
+    clinical_names = np.load(
+        os.path.join(args.datadir, "clinical_names.npy"), allow_pickle=True)
 
+X = {mod: [] for mod in modalities}
 for data in loader:
     data, metadata, _ = data
     if args.to_predict in metadata.keys():
@@ -273,9 +279,26 @@ for data in loader:
     else:
         index_to_predict = clinical_names.tolist().index(args.to_predict)
         all_label_data.append(data["clinical"][:, index_to_predict])
+    for modality in modalities:
+        path_to_scaler = os.path.join(
+            args.datadir, f"{modality}_scaler.save")
+        if not os.path.exists(path_to_scaler) and args.to_predict != "age":
+            X[modality] += data[modality].view(
+                (len(data[modality]), -1)).tolist()
+for modality in modalities:
+    path_to_scaler = os.path.join(
+        args.datadir, f"{modality}_scaler.save")
+    if not os.path.exists(path_to_scaler) and args.to_predict != "age":
+        print("Fit scaler")
+        scaler = StandardScaler()
+        scaler.fit(X[modality])
+        joblib.dump(scaler, path_to_scaler)
+
+
 all_label_data = np.concatenate(all_label_data)
 label_values = np.unique(all_label_data)
 # plt.hist(all_label_data)
+
 
 def corr_metric(y_true, y_pred):
     mat = np.concatenate([y_true[:, np.newaxis], y_pred[:, np.newaxis]], axis=1)
@@ -342,7 +365,8 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
     scalers = {mod: None for mod in modalities}
     if scaling:
         for modality in modalities:
-            path_to_scaler = os.path.join(args.datadir, f"{modality}_scaler.save")
+            path_to_scaler = os.path.join(
+                args.datadir, f"{modality}_scaler.save")
             scaler = joblib.load(path_to_scaler)
             scalers[modality] =  transforms.Compose([
                 Reshape((1, -1)),
@@ -355,18 +379,33 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
     on_the_fly_transform = dict()
     for modality in modalities:
         transformer = Transformer()
-        if args.standardize:
+        if local_args.standardize:
             transformer.register(scalers[modality])
-        if args.normalize:
+        if local_args.normalize:
             transformer.register(Normalize())
         on_the_fly_transform[modality] = transformer
+    
+    if args.to_predict == "age" and local_args.data_train != args.data:
+        train_datadir = args.datadir.replace(args.data, local_args.data_train)
+        dataset = DataManager(
+            dataset=local_args.data_train, datasetdir=train_datadir,
+            modalities=modalities, stratify=["sex", "age", "site"],
+            discretize=["age"], transform=transform,
+            on_the_fly_transform=on_the_fly_transform,
+            overwrite=False, test_size="defaults", **kwargs)
 
-    dataset = DataManager(
-        dataset=args.data, datasetdir=args.datadir, modalities=modalities,
-        stratify=["sex", "age", "site"], discretize=["age"],
-        transform=transform, on_the_fly_transform=on_the_fly_transform,
-        overwrite=False, test_size="defaults", **kwargs)
-    if args.data_train == args.data:
+        test_dataset = DataManager(
+            dataset=args.data, datasetdir=args.datadir, modalities=modalities,
+            transform=transform, on_the_fly_transform=on_the_fly_transform,
+            overwrite=False, test_size=0, **kwargs)
+        dataset.test_dataset = test_dataset["train"]
+    else:
+        dataset = DataManager(
+            dataset=args.data, datasetdir=args.datadir, modalities=modalities,
+            stratify=["sex", "age", "site"], discretize=["age"],
+            transform=transform, on_the_fly_transform=on_the_fly_transform,
+            overwrite=False, test_size=test_size, **kwargs)
+    if local_args.data_train == args.data:
         dataset.create_val_from_test(
             val_size=0.5, stratify=["sex", "age", "site"], discretize=["age"])
     all_metrics = {}
@@ -390,7 +429,7 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
         shuffle=True)
 
     test_dataset = dataset["test"]
-    if args.data_train == args.data:
+    if local_args.data_train == args.data:
         test_dataset = test_dataset["test"]
     test_loader = torch.utils.data.DataLoader(
         test_dataset, batch_size=batch_size, num_workers=6, pin_memory=True,
@@ -474,6 +513,7 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
         final_value_per_metric[metric] = average_metrics[metric]
         final_std_per_metric[metric] = std_metrics[metric]
     print(final_value_per_metric["real_mae"])
+    print(final_value_per_metric["r2"])
     with open(os.path.join(resdir, 'final_values.json'), 'w') as fp:
         json.dump(final_value_per_metric, fp)
 

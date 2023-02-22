@@ -199,9 +199,12 @@ for setup_id in setups["id"].values:
     for name in evaluation_metrics.keys():
         all_metrics[name] = []
     path_to_metrics = os.path.join(checkpoints_path, "validation_metrics.json")
+    last_checkpoint = os.path.join(checkpoints_path,
+                                   f"model_epoch_{local_args.epochs}.pth")
 
     if (local_args.ico_order != 5 or os.path.exists(path_to_metrics)
-        or not os.path.exists(checkpoints_path)):
+        or not os.path.exists(checkpoints_path)
+        or not os.path.exists(last_checkpoint)):
         continue
 
     epochs = []
@@ -209,7 +212,8 @@ for setup_id in setups["id"].values:
     print(checkpoints_path)
     for file in tqdm(os.listdir(checkpoints_path)):
         full_path = os.path.join(checkpoints_path, file)
-        if not (os.path.isfile(full_path) and file.endswith("pth") and "model" in file):
+        if not (os.path.isfile(full_path) and file.endswith("pth")
+                and "model" in file):
             continue
         checkpoint = torch.load(full_path)
         checkpoint = encoder_cp_from_model_cp(checkpoint)
