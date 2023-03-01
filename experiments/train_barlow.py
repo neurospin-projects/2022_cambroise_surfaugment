@@ -217,11 +217,6 @@ kwargs = {
     # "clinical": {"z_score": False}
 }
 
-eval_metrics = {"mae": mean_absolute_error}
-metric_for_perf = "mae"
-regressor_params = [0.01, 0.1, 1, 10, 100]
-regressor = Ridge
-
 scalers = {mod: None for mod in modalities}
 if args.batch_augment > 0 or args.standardize:
     original_dataset = DataManager(
@@ -457,6 +452,11 @@ use_board = False
 if args.epochs > 0 and use_board:
     board = Board(env=args)
 
+eval_metrics = {"mae": mean_absolute_error}
+metric_for_perf = "mae"
+regressor_params = [0.01, 0.1, 1, 10, 100]
+regressor = Ridge
+
 print(model)
 print("Number of trainable parameters : ",
         sum(p.numel() for p in model.parameters() if p.requires_grad))
@@ -555,10 +555,10 @@ for epoch in range(start_epoch, args.epochs + 1):
         all_representations = np.concatenate(all_representations)
         all_labels = np.concatenate(all_labels)
         regressors = [regressor(alpha=param) for param in regressor_params]
-        for regressor in regressors:
-            regressor.fit(all_representations, all_labels)
+        for reg in regressors:
+            reg.fit(all_representations, all_labels)
         preds = [
-            regressor.predict(all_representations) for regressor in regressors]
+            reg.predict(all_representations) for reg in regressors]
         for name, metric in eval_metrics.items():
             best_metric = 1000
             for pred in preds:
@@ -585,7 +585,7 @@ for epoch in range(start_epoch, args.epochs + 1):
         all_representations = np.concatenate(all_representations)
         all_labels = np.concatenate(all_labels)
         preds = [
-            regressor.predict(all_representations) for regressor in regressors]
+            reg.predict(all_representations) for reg in regressors]
         for name, metric in eval_metrics.items():
             subname = "valid_" + name
             best_metric = 1000
