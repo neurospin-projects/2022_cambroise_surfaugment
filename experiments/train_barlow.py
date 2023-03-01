@@ -157,10 +157,11 @@ run_id = int(time.time())
 
 def same_params_but_epochs(args_str):
     epochs = args_str.split("_epochs")[0].split("_")[-1]
-    if "projector" in args_str:
+    params_to_test = params
+    if "projector" in params:
         projector = "_projector_" + args_str.split("_")[-1]
-        args_str.replace(projector, "")
-    return (params == args_str.replace(
+        params_to_test.replace(projector, "")
+    return (params_to_test == args_str.replace(
         f"{epochs}_epochs", f"{args.epochs}_epochs"))
 
 if args.start_epoch > 1:
