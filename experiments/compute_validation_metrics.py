@@ -62,17 +62,27 @@ def params_from_args(params):
         "_bn_{}_conv_{}_latent_{}_wd_{}_{}_epochs_lr_{}_reduced_{}_bs_{}_ba_{}"
         "_ima_{}_blur_{}_noise_{}_cutout_{}_normalize_{}_standardize_{}_"
         "loss_param_{}_sigma_{}")
+    new_new_format = (
+        "pretrain_{}_on_{}_surf_order_{}_with_{}_features_fusion_{}_act_{}"
+        "_bn_{}_conv_{}_latent_{}_wd_{}_{}_epochs_lr_{}_reduced_{}_bs_{}_ba_{}"
+        "_ima_{}_blur_{}_noise_{}_cutout_{}_normalize_{}_standardize_{}_"
+        "loss_param_{}_sigma_{}_projector_{}")
     old = True
+    new = False
     try:
         parsed = parse.parse(old_format, params.split("/")[-2])
     except Exception:
         old = False
-        parsed = parse.parse(new_format, params)
+        try:
+            parsed = parse.parse(new_format, params)
+        except Exception:
+            new = True
+            parsed = parse.parse(new_new_format, params)
     args_names = [
         "data_train", "n_features", "fusion_level", "activation",
         "batch_norm", "conv_filters", "latent_dim",
         "weight_decay", "epochs", "learning_rate", "batch_size",
-        "batch_augment", "inter_modal_augment", "gaussian_blur_augment",
+        "batch_augment", "inter_modal_augment", "blur",
         "cutout", "normalize", "standardize"]
     if not old:
         args_names = [
@@ -82,11 +92,17 @@ def params_from_args(params):
             "reduce_lr", "batch_size", "batch_augment",
             "inter_modal_augment", "blur", "noise", "cutout",
             "normalize", "standardize", "loss_param", "sigma"]
+    if new: 
+        args_names.append("projector")
     for idx, value in enumerate(parsed.fixed):
         if value.isdigit():
-            value = float(value)
-            value = int(value) if int(value) == value else value
-        elif value in ["True", "False"]:
+            value = int(value)
+        else:
+            try:
+                value = float(value)
+            except ValueError:
+                pass
+        if value in ["True", "False"]:
             value = value == "True"
         setattr(args, args_names[idx], value)
     return args
@@ -195,14 +211,18 @@ for setup_id in setups["id"].values:
         dataset["test"]["valid"], batch_size=batch_size, num_workers=6,
         pin_memory=True, shuffle=True)
 
+    regressor_params = [0.01, 0.1, 1, 10, 100]
+    param_name = "alpha"
     all_metrics = {}
     for name in evaluation_metrics.keys():
         all_metrics[name] = []
+        for _ in regressor_params:
+            all_metrics[name].append([])
     path_to_metrics = os.path.join(checkpoints_path, "validation_metrics.json")
     last_checkpoint = os.path.join(checkpoints_path,
                                    f"model_epoch_{local_args.epochs}.pth")
 
-    if (local_args.ico_order != 5 or os.path.exists(path_to_metrics)
+    if (local_args.ico_order != 5 #or os.path.exists(path_to_metrics)
         or not os.path.exists(checkpoints_path)
         or not os.path.exists(last_checkpoint)):
         continue
@@ -224,7 +244,7 @@ for setup_id in setups["id"].values:
         encoder.load_state_dict(checkpoint)
         model = encoder.to(device)
         model.eval()
-        regressor = Ridge()
+        regressor = Ridge
         latents = []
         ys = []
         for step, x in enumerate(train_loader):
@@ -237,11 +257,10 @@ for setup_id in setups["id"].values:
                 y = x["clinical"][:, index_to_predict]
             ys.append(y)
             with torch.cuda.amp.autocast():
-                X = (left_x, right_x)
-                latents.append(model(X).squeeze().detach().cpu().numpy())
-        y = np.concatenate(ys)
+                data = (left_x, right_x)
+                latents.append(model(data).squeeze().detach().cpu().numpy())
+        Y = np.concatenate(ys)
         X = np.concatenate(latents)
-        regressor.fit(X, y)
 
         valid_latents = []
         valid_ys = []
@@ -256,33 +275,50 @@ for setup_id in setups["id"].values:
                 y = x["clinical"][:, index_to_predict]
             valid_ys.append(y)
             with torch.cuda.amp.autocast():
-                X = (left_x, right_x)
-                valid_latents.append(model(X).squeeze().detach().cpu().numpy())
+                data = (left_x, right_x)
+                valid_latents.append(model(data).squeeze().detach().cpu().numpy())
 
         X_valid = np.concatenate(valid_latents)
-        y_valid = np.concatenate(valid_ys)
+        Y_valid = np.concatenate(valid_ys)
 
-        y_hat_valid = regressor.predict(X_valid)
-        for name, metric in evaluation_metrics.items():
-            all_metrics[name].append(metric(y_valid, y_hat_valid))
+        for value_idx, value in enumerate(regressor_params):
+            local_regressor = regressor(**{param_name: value})
+            local_regressor.fit(X, Y)
+            y_hat_valid = local_regressor.predict(X_valid)
+            for name, metric in evaluation_metrics.items():
+                all_metrics[name][value_idx].append(metric(Y_valid, y_hat_valid))
     
     if len(epochs) > 0:
         best_epoch_per_metric = {}
         best_value_per_metric = {}
+        best_param_value_per_metric = {}
         for name in evaluation_metrics.keys():
-            sorted_indices = np.argsort(all_metrics[name])
+            best_epoch_per_metric[name] = []
+            best_value_per_metric[name] = []
+            for value_idx, _ in enumerate(regressor_params):
+                sorted_indices = np.argsort(all_metrics[name][value_idx])
+                best_index = 0 if what_is_best[name] == "lower" else -1
+                best_epoch = epochs[sorted_indices[best_index]]
+                best_value = all_metrics[name][value_idx][sorted_indices[best_index]]
+                best_epoch_per_metric[name].append(best_epoch)
+                best_value_per_metric[name].append(best_value)
+            sorted_indices = np.argsort(best_value_per_metric[name])
             best_index = 0 if what_is_best[name] == "lower" else -1
-            best_epoch = epochs[sorted_indices[best_index]]
-            best_value = all_metrics[name][sorted_indices[best_index]]
+            best_epoch = best_epoch_per_metric[name][sorted_indices[best_index]]
+            best_value = best_value_per_metric[name][sorted_indices[best_index]]
+            best_param_value = regressor_params[sorted_indices[best_index]]
             best_epoch_per_metric[name] = best_epoch
             best_value_per_metric[name] = best_value
+            best_param_value_per_metric[name] = best_param_value
         print(str(setup_id) + ",".join([f" best {name} : {value}"
               for name, value in best_value_per_metric.items()]))
     all_metrics["epochs"] = epochs
     if is_finished:
         setups = pd.read_table(args.setups_file)
-        setups.loc[setups["id"] == setup_id, "best_epoch"] = (
-            best_epoch_per_metric[final_metric])
+        setups.loc[setups["id"] == setup_id, ["best_epoch", "best_param", "best_value"]] = (
+            best_epoch_per_metric[final_metric],
+            best_param_value_per_metric[final_metric],
+            best_value_per_metric[final_metric])
         setups.to_csv(args.setups_file, index=False, sep="\t")
         with open(path_to_metrics, 'w') as fp:
             json.dump(all_metrics, fp)

@@ -134,13 +134,14 @@ activation = "ReLU"
 params = ("pretrain_{}_on_{}_surf_order_{}_with_{}_features_fusion_{}_act_{}"
     "_bn_{}_conv_{}_latent_{}_wd_{}_{}_epochs_lr_{}_reduced_{}_bs_{}_ba_{}_ima"
     "_{}_blur_{}_noise_{}_cutout_{}_normalize_{}_standardize_{}_loss_param_{}_"
-    "sigma_{}").format(
+    "sigma_{}_projector_{}").format(
         args.algo, args.data, args.ico_order, n_features, args.fusion_level,
         activation, args.batch_norm, "-".join([str(s) for s in args.conv_filters]),
         args.latent_dim, args.weight_decay, args.epochs, args.learning_rate,
         args.reduce_lr, args.batch_size, args.batch_augment,
         args.inter_modal_augment, args.blur, args.noise, args.cutout,
-        args.normalize, args.standardize, args.loss_param, args.sigma)
+        args.normalize, args.standardize, args.loss_param, args.sigma,
+        args.projector)
 
 # Prepare process
 setup_logging(level="info", logfile=None)
@@ -181,7 +182,9 @@ else:
         pd.DataFrame({
             "id": [run_id],
             "args": [params],
-            "best_epoch": [0]})],
+            "best_epoch": [0],
+            "best_param": [1],
+            "best_value": [1000]})],
         ignore_index=True)
     setups.to_csv(os.path.join(args.outdir, "pretrain", "setups.tsv"),
         index=False, sep="\t")
@@ -216,6 +219,8 @@ kwargs = {
 
 eval_metrics = {"mae": mean_absolute_error}
 metric_for_perf = "mae"
+regressor_params = [0.01, 0.1, 1, 10, 100]
+regressor = Ridge
 
 scalers = {mod: None for mod in modalities}
 if args.batch_augment > 0 or args.standardize:
@@ -308,12 +313,12 @@ if args.batch_augment > 0 or args.standardize:
             print("Reducted")
 
             regressor.fit(X, Y)
-            check_site_biasor.fit(X, sites)
-            sites_hat = check_site_biasor.predict(X)
-            sites_valid_hat = check_site_biasor.predict(X_valid)
+            # check_site_biasor.fit(X, sites)
+            # sites_hat = check_site_biasor.predict(X)
+            # sites_valid_hat = check_site_biasor.predict(X_valid)
 
-            print(balanced_accuracy_score(sites, sites_hat))
-            print(balanced_accuracy_score(sites_valid, sites_valid_hat))
+            # print(balanced_accuracy_score(sites, sites_hat))
+            # print(balanced_accuracy_score(sites_valid, sites_valid_hat))
             # print(mean_absolute_error(Y, regressor.predict(X)))
             # print(mean_absolute_error(Y_valid, regressor.predict(X_valid)))
             # print(r2_score(Y, regressor.predict(X)))
@@ -531,7 +536,7 @@ for epoch in range(start_epoch, args.epochs + 1):
                 loss, logits, target = loss
             
             stats["valid_loss"] += loss.item()
-        regressor = Ridge()
+
         all_representations = []
         all_labels = []
         for data in train_no_augment_loader:
@@ -549,13 +554,21 @@ for epoch in range(start_epoch, args.epochs + 1):
 
         all_representations = np.concatenate(all_representations)
         all_labels = np.concatenate(all_labels)
-        regressor.fit(all_representations, all_labels)
-        preds = regressor.predict(all_representations) 
+        regressors = [regressor(alpha=param) for param in regressor_params]
+        for regressor in regressors:
+            regressor.fit(all_representations, all_labels)
+        preds = [
+            regressor.predict(all_representations) for regressor in regressors]
         for name, metric in eval_metrics.items():
-            if name not in stats:
-                stats[name] = 0
-            stats[name] += metric(preds, all_labels)
+            best_metric = 1000
+            for pred in preds:
+                metric_value = metric(pred, all_labels)
+                if metric_value < best_metric:
+                    best_metric = metric_value
+            stats[name] = best_metric
 
+        all_representations = []
+        all_labels = []
         for data in valid_no_augment_loader:
             data, metadata, _ = data
             y1_lh = data["surface-lh"]
@@ -566,16 +579,22 @@ for epoch in range(start_epoch, args.epochs + 1):
             with torch.cuda.amp.autocast():
                 representations = model.backbone.forward((y1_lh, y1_rh))
             
-            labels = labels.detach().cpu().numpy()
-            representations = representations.detach().cpu().numpy()
+            all_labels.append(labels.detach().cpu().numpy())
+            all_representations.append(representations.detach().cpu().numpy())
 
-            preds = regressor.predict(representations)
-            for name, metric in eval_metrics.items():
-                subname = "valid_" + name
-                if subname not in stats:
-                    stats[subname] = 0
-                stats[subname] += metric(
-                    preds, labels) / len(valid_no_augment_loader)
+        all_representations = np.concatenate(all_representations)
+        all_labels = np.concatenate(all_labels)
+        preds = [
+            regressor.predict(all_representations) for regressor in regressors]
+        for name, metric in eval_metrics.items():
+            subname = "valid_" + name
+            best_metric = 1000
+            for param_idx, pred in enumerate(preds):
+                metric_value = metric(pred, all_labels)
+                if metric_value < best_metric:
+                    best_metric = metric_value
+                    best_param_idx = param_idx
+            stats[subname] = best_metric
             
     stats["time"] = int(time.time() - start_time)
     mean_loss = (
@@ -614,8 +633,12 @@ for epoch in range(start_epoch, args.epochs + 1):
             if last_valid_perfs < best_valid_perf:
                 best_saved_epoch = epoch
                 best_valid_perf = last_valid_perfs
-                setups = pd.read_table(os.path.join(args.outdir, "pretrain", "setups.tsv"))
-                setups.loc[setups["id"] == run_id, "best_epoch"] = best_saved_epoch
+                setups = pd.read_table(
+                    os.path.join(args.outdir, "pretrain", "setups.tsv"))
+                setups.loc[setups["id"] == run_id,
+                           ["best_epoch", "best_param", "best_value"]] = (
+                    best_saved_epoch, regressor_params[best_param_idx],
+                    best_valid_perf)
                 setups.to_csv(os.path.join(args.outdir, "pretrain", "setups.tsv"),
                     index=False, sep="\t")
         # torch.save(model.backbone[0].state_dict(),
