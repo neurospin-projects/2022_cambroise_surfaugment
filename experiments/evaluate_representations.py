@@ -188,8 +188,8 @@ else:
     cases = cases(128, 1024)
     best_cp_per_case = dict()
     for setup_id in setups["id"].values:
-        params, epoch, param = setups[setups["id"] == setup_id][
-            ["args", "best_epoch", "best_param"]].values[0]
+        params, epoch, param, best_value = setups[setups["id"] == setup_id][
+            ["args", "best_epoch", "best_param", "best_value"]].values[0]
         local_args = params_from_args(params)
         if not hasattr(local_args, "algo"):
             local_args.algo = "barlow"
@@ -215,11 +215,11 @@ else:
                 "/".join(pretrained_path.split("/")[:-1]),
                 "validation_metrics.json")
             if os.path.exists(validation_metrics_path):
-                with open(validation_metrics_path, "r") as f:
-                    validation_metrics = json.load(f)
-                best_metric = validation_metrics[validation_metric][
-                    regressor_params.index(param)][
-                    validation_metrics["epochs"].index(epoch)]
+                # with open(validation_metrics_path, "r") as f:
+                #     validation_metrics = json.load(f)
+                best_metric = best_value#validation_metrics[validation_metric][
+                    #regressor_params.index(param)][
+                    #validation_metrics["epochs"].index(epoch)]
                 if case not in best_cp_per_case.keys():
                     best_cp_per_case[case] = (
                         setup_id, checkpoint, best_metric)
