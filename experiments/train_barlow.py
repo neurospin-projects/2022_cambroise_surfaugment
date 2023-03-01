@@ -159,8 +159,8 @@ def same_params_but_epochs(args_str):
     epochs = args_str.split("_epochs")[0].split("_")[-1]
     params_to_test = params
     if "projector" in params:
-        projector = "_projector_" + args_str.split("_")[-1]
-        params_to_test.replace(projector, "")
+        projector = "_projector_" + params.split("_")[-1]
+        params_to_test = params_to_test.replace(projector, "")
     return (params_to_test == args_str.replace(
         f"{epochs}_epochs", f"{args.epochs}_epochs"))
 
