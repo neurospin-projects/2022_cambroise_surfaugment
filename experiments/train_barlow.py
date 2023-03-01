@@ -329,7 +329,7 @@ if args.batch_augment > 0 or args.standardize:
             groups_valid[modality] = neigh_idx_valid
             print("Groups built.")
             
-            probabilities = (1, 0.1) if args.algo == "barlow" else (0.5, 0.5)
+            probabilities = (0.5, 0.5)#(1, 0.1) if args.algo == "barlow" else (0.5, 0.5)
             batch_transforms[modality] = Bootstrapping(
                 p=probabilities, p_corrupt=args.batch_augment,
                 groups=groups[modality])
@@ -385,7 +385,7 @@ for modality in modalities:
 
 if args.inter_modal_augment > 0:
     normalizer = Normalize() if args.batch_augment == 0 and normalize else None
-    probabilities = (1, 0.1) if args.algo == "barlow" else (0.5, 0.5)
+    probabilities = (0.5, 0.5)#(1, 0.1) if args.algo == "barlow" else (0.5, 0.5)
     on_the_fly_inter_transform = PermuteBeetweenModalities(
         probabilities, args.inter_modal_augment, ("surface-lh", "surface-rh"),
         normalizer)
