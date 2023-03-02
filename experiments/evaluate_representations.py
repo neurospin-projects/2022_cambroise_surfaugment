@@ -64,7 +64,7 @@ all_modalities = modalities.copy()
 metrics = ["thickness", "curv", "sulc"]
 n_features = len(metrics)
 transform = None
-batch_size = 32
+batch_size = 64
 
 
 def encoder_cp_from_model_cp(checkpoint):
@@ -628,7 +628,8 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
             with torch.cuda.amp.autocast():
                 data = (left_x, right_x)
                 test_latents.append(model(data).squeeze().detach().cpu().numpy())
-
+        print(fold)
+        print(len(test_latents))
         X_test = np.concatenate(test_latents)
         Y_test = np.concatenate(test_transformed_ys)
         real_y_test = np.concatenate(test_ys)

@@ -134,13 +134,14 @@ activation = "ReLU"
 params = ("pretrain_{}_on_{}_surf_order_{}_with_{}_features_fusion_{}_act_{}"
     "_bn_{}_conv_{}_latent_{}_wd_{}_{}_epochs_lr_{}_reduced_{}_bs_{}_ba_{}_ima"
     "_{}_blur_{}_noise_{}_cutout_{}_normalize_{}_standardize_{}_loss_param_{}_"
-    "sigma_{}").format(
+    "sigma_{}_projector_{}").format(
         args.algo, args.data, args.ico_order, n_features, args.fusion_level,
         activation, args.batch_norm, "-".join([str(s) for s in args.conv_filters]),
         args.latent_dim, args.weight_decay, args.epochs, args.learning_rate,
         args.reduce_lr, args.batch_size, args.batch_augment,
         args.inter_modal_augment, args.blur, args.noise, args.cutout,
-        args.normalize, args.standardize, args.loss_param, args.sigma)
+        args.normalize, args.standardize, args.loss_param, args.sigma,
+        args.projector)
 
 # Prepare process
 setup_logging(level="info", logfile=None)
