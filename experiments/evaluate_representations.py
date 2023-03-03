@@ -21,7 +21,7 @@ from surfify.utils import (setup_logging, icosahedron, downsample_data,
 
 from multimodaldatasets.datasets import DataManager
 from augmentations import Normalize, Reshape, Transformer
-import parse
+from utils import params_from_args
 
 
 # Get user parameters
@@ -73,61 +73,6 @@ def encoder_cp_from_model_cp(checkpoint):
                 for key, value in checkpoint["model_state_dict"].items() if name_to_check in key}
     return checkpoint
 
-def params_from_args(params):
-    old_format = (
-        "deepint_barlow_{}_surf_{}_features_fusion_{}_act_{}_bn_{}_conv_{}"
-        "_latent_{}_wd_{}_{}_epochs_lr_{}_bs_{}_ba_{}_ima_{}_gba_{}_cutout_{}"
-        "_normalize_{}_standardize_{}")
-    new_format = (
-        "pretrain_{}_on_{}_surf_order_{}_with_{}_features_fusion_{}_act_{}"
-        "_bn_{}_conv_{}_latent_{}_wd_{}_{}_epochs_lr_{}_reduced_{}_bs_{}_ba_{}"
-        "_ima_{}_blur_{}_noise_{}_cutout_{}_normalize_{}_standardize_{}_"
-        "loss_param_{}_sigma_{}")
-    new_new_format = (
-        "pretrain_{}_on_{}_surf_order_{}_with_{}_features_fusion_{}_act_{}"
-        "_bn_{}_conv_{}_latent_{}_wd_{}_{}_epochs_lr_{}_reduced_{}_bs_{}_ba_{}"
-        "_ima_{}_blur_{}_noise_{}_cutout_{}_normalize_{}_standardize_{}_"
-        "loss_param_{}_sigma_{}_projector_{}")
-    old = True
-    new = False
-    try:
-        parsed = parse.parse(old_format, params.split("/")[-2])
-    except Exception:
-        old = False
-        try:
-            parsed = parse.parse(new_format, params)
-        except Exception:
-            new = True
-            parsed = parse.parse(new_new_format, params)
-    args_names = [
-        "data_train", "n_features", "fusion_level", "activation",
-        "batch_norm", "conv_filters", "latent_dim",
-        "weight_decay", "epochs", "learning_rate", "batch_size",
-        "batch_augment", "inter_modal_augment", "blur",
-        "cutout", "normalize", "standardize"]
-    if not old:
-        args_names = [
-            "algo", "data_train", "ico_order", "n_features", "fusion_level",
-            "activation", "batch_norm", "conv_filters",
-            "latent_dim", "weight_decay", "epochs", "learning_rate",
-            "reduce_lr", "batch_size", "batch_augment",
-            "inter_modal_augment", "blur", "noise", "cutout",
-            "normalize", "standardize", "loss_param", "sigma"]
-    if new: 
-        args_names.append("projector")
-    for idx, value in enumerate(parsed.fixed):
-        if value.isdigit():
-            value = int(value)
-        else:
-            try:
-                value = float(value)
-            except ValueError:
-                pass
-        if value in ["True", "False"]:
-            value = value == "True"
-        setattr(args, args_names[idx], value)
-    return args
-
 def matching_args_to_case(args, cases):
     relation_mapper = {
         "gt": lambda x, y: x > y,
@@ -160,7 +105,7 @@ if args.pretrained_setup != "None":
         pretrained_path = params
         pretrained_path = pretrained_path.replace(
             "encoder.pth", "model_epoch_{}.pth".format(int(epoch)))
-    args = params_from_args(params)
+    args = params_from_args(params, args)
     
     checkpoint = torch.load(pretrained_path)
     checkpoint = encoder_cp_from_model_cp(checkpoint)
@@ -190,7 +135,7 @@ else:
     for setup_id in setups["id"].values:
         params, epoch, param, best_value = setups[setups["id"] == setup_id][
             ["args", "best_epoch", "best_param", "best_value"]].values[0]
-        local_args = params_from_args(params)
+        local_args = params_from_args(params, args)
         if not hasattr(local_args, "algo"):
             local_args.algo = "barlow"
         if not hasattr(local_args, "sigma"):
@@ -414,7 +359,7 @@ else:
 for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
     print(f"Best setup for case {cases_names[case_id]} : {setup_id}")
     params, best_param = setups[setups["id"] == setup_id][["args", "best_param"]].values[0]
-    local_args = params_from_args(params)
+    local_args = params_from_args(params, args)
     best_params["regression"]["alpha"] = best_param
 
     conv_filters = [int(num) for num in local_args.conv_filters.split("-")]
@@ -628,8 +573,6 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
             with torch.cuda.amp.autocast():
                 data = (left_x, right_x)
                 test_latents.append(model(data).squeeze().detach().cpu().numpy())
-        print(fold)
-        print(len(test_latents))
         X_test = np.concatenate(test_latents)
         Y_test = np.concatenate(test_transformed_ys)
         real_y_test = np.concatenate(test_ys)
