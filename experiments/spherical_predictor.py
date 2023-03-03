@@ -103,7 +103,6 @@ parser.add_argument(
     help="optionnally uses inter modality augment.")
 args = parser.parse_args()
 args.ngpus_per_node = torch.cuda.device_count()
-args.conv_filters = [int(item) for item in args.conv_filters.split("-")]
 args.ico_order = 5
 
 # Prepare process
@@ -149,14 +148,20 @@ checkpoint = None
 if args.pretrained_setup != "None":
     assert args.setups_file != "None"
     setups = pd.read_table(args.setups_file)
-    pretrained_path, epoch = setups[setups["id"] == int(args.pretrained_setup)][["path", "epoch"]].values[0]
-    args = params_from_args(pretrained_path, args)
-    max_epoch = int(pretrained_path.split("_epochs")[0].split("_")[-1])
-    if epoch != max_epoch:
-        pretrained_path = pretrained_path.replace("encoder.pth", "model_epoch_{}.pth".format(int(epoch)))
+    params, epoch = setups[setups["id"] == int(args.pretrained_setup)][["args", "best_epoch"]].values[0]
+    pretrained_path = os.path.join(
+        "/".join(args.setups_file.split("/")[:-1]),
+        "checkpoints", args.pretrained_setup,
+        "model_epoch_{}.pth".format(int(epoch)))
+    if int(args.pretrained_setup) < 10000:
+        pretrained_path = params
+        pretrained_path = pretrained_path.replace(
+            "encoder.pth", "model_epoch_{}.pth".format(int(epoch)))
+    epochs, lr = args.epochs, args.learning_rate
+    args = params_from_args(params, args)
+    args.epochs, args.learning_rate = epochs, lr
     checkpoint = torch.load(pretrained_path)
-    if epoch != max_epoch:
-        checkpoint = encoder_cp_from_barlow_cp(checkpoint)
+    checkpoint = encoder_cp_from_barlow_cp(checkpoint)
 # else:
 #     args.n_features = len(metrics)
 #     args.fusion_level = 1
@@ -167,6 +172,7 @@ if args.pretrained_setup != "None":
 #     args.conv_filters = [128, 128, 256, 256]
 #     args.gaussian_blur_augment = False
 #     args.cutout = False
+args.conv_filters = [int(item) for item in args.conv_filters.split("-")]
 
 input_shape = (len(metrics), len(ico_verts))
 
@@ -667,19 +673,19 @@ for metric in all_metrics.keys():
     std_metrics[metric] = np.std(all_metrics[metric], axis=1)
 
 if not args.evaluate:
-    groups = {"closeness": ["real_mae", "real_rmse"], "coherence": ["r2", "correlation"]}
-    limit_per_group = {"closeness": (0, 10), "coherence": (0, 1)}
-    for name, group in groups.items():
-        plt.figure()
-        for metric in group:
-            values = average_metrics[metric]
-            plt.plot(range(args.epochs), values, label=metric)
-        plt.title("Average validation metrics")
-        plt.ylim(limit_per_group[name])
-        plt.xlabel("epoch")
-        plt.legend()
-        plt.savefig(os.path.join(
-            checkpoint_dir,"validation_metrics_{}.png".format(name)))
+    # groups = {"closeness": ["real_mae", "real_rmse"], "coherence": ["r2", "correlation"]}
+    # limit_per_group = {"closeness": (0, 10), "coherence": (0, 1)}
+    # for name, group in groups.items():
+    #     plt.figure()
+    #     for metric in group:
+    #         values = average_metrics[metric]
+    #         plt.plot(range(args.epochs), values, label=metric)
+    #     plt.title("Average validation metrics")
+    #     plt.ylim(limit_per_group[name])
+    #     plt.xlabel("epoch")
+    #     plt.legend()
+    #     plt.savefig(os.path.join(
+    #         checkpoint_dir,"validation_metrics_{}.png".format(name)))
 
     best_epochs_per_metric = {}
     best_values_per_metric = {}
