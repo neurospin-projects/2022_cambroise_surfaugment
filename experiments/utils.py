@@ -16,16 +16,16 @@ def params_from_args(params, args):
         "_ima_{}_blur_{}_noise_{}_cutout_{}_normalize_{}_standardize_{}_"
         "loss_param_{}_sigma_{}_projector_{}")
     old = True
-    new = False
+    new = True
     try:
         parsed = parse.parse(old_format, params.split("/")[-2])
     except Exception:
         old = False
         try:
-            parsed = parse.parse(new_format, params)
-        except Exception:
-            new = True
             parsed = parse.parse(new_new_format, params)
+        except Exception:
+            new = False
+            parsed = parse.parse(new_format, params)
     args_names = [
         "data_train", "n_features", "fusion_level", "activation",
         "batch_norm", "conv_filters", "latent_dim",

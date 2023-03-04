@@ -153,7 +153,7 @@ else:
             if int(setup_id) < 10000:
                 pretrained_path = params
                 pretrained_path = pretrained_path.replace(
-                    "encoder.pth", "model_epoch_{}.pth".format(int(epoch)))            
+                    "encoder.pth", "model_epoch_{}.pth".format(int(epoch)))
             checkpoint = torch.load(pretrained_path)
             checkpoint = encoder_cp_from_model_cp(checkpoint)
             validation_metrics_path = os.path.join(
