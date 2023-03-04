@@ -101,6 +101,16 @@ parser.add_argument(
 parser.add_argument(
     "--inter-modal-augment", "-ima", default=0.0, type=float,
     help="optionnally uses inter modality augment.")
+parser.add_argument(
+    "--reduce-lr", action="store_true",
+    help="optionnally reduces the learning rate during training.")
+parser.add_argument(
+    "--normalize", action="store_true",
+    help="optionnally normalizes input.")
+parser.add_argument(
+    "--standardize", action="store_true",
+    help="optionnally standardize input with statistics computed across"
+         "the train dataset.")
 args = parser.parse_args()
 args.ngpus_per_node = torch.cuda.device_count()
 args.ico_order = 5
@@ -176,7 +186,7 @@ args.conv_filters = [int(item) for item in args.conv_filters.split("-")]
 
 input_shape = (len(metrics), len(ico_verts))
 
-scaling = True
+scaling = args.standardize
 scalers = {mod: None for mod in modalities}
 if scaling:
     for modality in modalities:
@@ -189,7 +199,7 @@ if scaling:
             torch.squeeze,
             Reshape(input_shape),
         ])
-normalize = True
+normalize = args.normalize
 on_the_fly_transform = dict()
 for modality in modalities:
     transformer = Transformer()
@@ -522,6 +532,9 @@ print("Number of trainable parameters : ",
 
 optimizer = optim.Adam(model.parameters(), lr=args.learning_rate,
                     weight_decay=args.weight_decay)
+
+if args.reduce_lr:
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.9)
 # if args.momentum > 0:
 #     optimizer = optim.SGD(model.parameters(), lr=args.learning_rate,
 #                         weight_decay=args.weight_decay, momentum=args.momentum)
@@ -658,6 +671,8 @@ for epoch in range(start_epoch, args.epochs):
     if args.evaluate and epoch == args.epochs - 1:
         print(stats)
         torch.save(model.state_dict(), os.path.join(checkpoint_dir, "model.pth"))
+    if args.reduce_lr:
+        scheduler.step()
         # scheduler.step()
     #     state = dict(epoch=epoch + 1,
     #                 model=model.state_dict(),

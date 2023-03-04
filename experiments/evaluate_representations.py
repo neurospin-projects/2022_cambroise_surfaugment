@@ -159,20 +159,21 @@ else:
             validation_metrics_path = os.path.join(
                 "/".join(pretrained_path.split("/")[:-1]),
                 "validation_metrics.json")
-            if os.path.exists(validation_metrics_path):
+            # if os.path.exists(validation_metrics_path):
                 # with open(validation_metrics_path, "r") as f:
                 #     validation_metrics = json.load(f)
-                best_metric = best_value#validation_metrics[validation_metric][
-                    #regressor_params.index(param)][
-                    #validation_metrics["epochs"].index(epoch)]
-                if case not in best_cp_per_case.keys():
-                    best_cp_per_case[case] = (
-                        setup_id, checkpoint, best_metric)
-                if ((best_cp_per_case[case][2] > best_metric and best_is_low)
-                    or (best_cp_per_case[case][2] < best_metric and
-                        not best_is_low)):
-                    best_cp_per_case[case] = (
-                        setup_id, checkpoint, best_metric)
+            # best_metric = validation_metrics[validation_metric][
+                #regressor_params.index(param)][
+                #validation_metrics["epochs"].index(epoch)]
+            best_metric = best_value
+            if case not in best_cp_per_case.keys():
+                best_cp_per_case[case] = (
+                    setup_id, checkpoint, best_metric)
+            if ((best_cp_per_case[case][2] > best_metric and best_is_low)
+                or (best_cp_per_case[case][2] < best_metric and
+                    not best_is_low)):
+                best_cp_per_case[case] = (
+                    setup_id, checkpoint, best_metric)
     checkpoints = [best_cp_per_case[case][1] for case in cases.keys()
                    if case in best_cp_per_case.keys()]
     setup_ids = [best_cp_per_case[case][0] for case in cases.keys()

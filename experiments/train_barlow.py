@@ -112,6 +112,10 @@ parser.add_argument(
 parser.add_argument(
     "--flip", action="store_true",
     help="optionnally uses flip augment.")
+parser.add_argument(
+    "--run-id", type=int,
+    help="Run id when ambiguous parameters"
+)
 
 args = parser.parse_args()
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -175,7 +179,11 @@ if args.start_epoch > 1:
             if os.path.isfile(old_file):
                 shutil.copy(old_file, new_file)
     else:
-        run_id = old_run_id.item()
+        if len(old_run_id) > 1 and args.run_id == -1:
+            raise ValueError("Parameters are ambiguous. You should provide a "
+                             "run id to know what training to resume.")
+        else:
+            run_id = old_run_id.item()
 else:
     setups = pd.concat([
         setups,
