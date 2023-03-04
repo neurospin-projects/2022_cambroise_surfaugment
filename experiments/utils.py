@@ -25,6 +25,7 @@ def params_from_args(params, args):
             parsed = parse.parse(new_new_format, params)
         except Exception:
             new = False
+            print("here")
             parsed = parse.parse(new_format, params)
     args_names = [
         "data_train", "n_features", "fusion_level", "activation",
