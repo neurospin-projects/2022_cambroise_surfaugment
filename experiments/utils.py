@@ -23,10 +23,8 @@ def params_from_args(params, args):
         old = False
         try:
             parsed = parse.parse(new_new_format, params)
-            print(parsed.fixed)
         except Exception:
             new = False
-            print("here")
             parsed = parse.parse(new_format, params)
     args_names = [
         "data_train", "n_features", "fusion_level", "activation",
