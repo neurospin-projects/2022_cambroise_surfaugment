@@ -23,6 +23,8 @@ def params_from_args(params, args):
         old = False
         try:
             parsed = parse.parse(new_new_format, params)
+            if parsed is None:
+                raise Exception()
         except Exception:
             new = False
             parsed = parse.parse(new_format, params)
