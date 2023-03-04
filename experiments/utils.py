@@ -40,8 +40,8 @@ def params_from_args(params, args):
             "reduce_lr", "batch_size", "batch_augment",
             "inter_modal_augment", "blur", "noise", "cutout",
             "normalize", "standardize", "loss_param", "sigma"]
-    if new: 
-        args_names.append("projector")
+        if new: 
+            args_names.append("projector")
     for idx, value in enumerate(parsed.fixed):
         if value.isdigit():
             value = int(value)
