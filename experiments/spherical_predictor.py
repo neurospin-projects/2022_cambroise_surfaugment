@@ -167,9 +167,9 @@ if args.pretrained_setup != "None":
         pretrained_path = params
         pretrained_path = pretrained_path.replace(
             "encoder.pth", "model_epoch_{}.pth".format(int(epoch)))
-    epochs, lr = args.epochs, args.learning_rate
+    epochs, lr, reduce_lr = args.epochs, args.learning_rate, args.reduce_lr
     args = params_from_args(params, args)
-    args.epochs, args.learning_rate = epochs, lr
+    args.epochs, args.learning_rate, args.reduce_lr = epochs, lr, reduce_lr
     checkpoint = torch.load(pretrained_path)
     checkpoint = encoder_cp_from_barlow_cp(checkpoint)
 # else:
@@ -530,11 +530,11 @@ model = model.to(device)
 print("Number of trainable parameters : ",
     sum(p.numel() for p in model.parameters() if p.requires_grad))
 
-optimizer = optim.Adam(model.parameters(), lr=args.learning_rate,
+optimizer = optim.Adam(model.parameters(), args.learning_rate,
                     weight_decay=args.weight_decay)
 
 if args.reduce_lr:
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.9)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.8)
 # if args.momentum > 0:
 #     optimizer = optim.SGD(model.parameters(), lr=args.learning_rate,
 #                         weight_decay=args.weight_decay, momentum=args.momentum)
@@ -563,7 +563,7 @@ for epoch in range(start_epoch, args.epochs):
     # Training
     model.train()
     with tqdm(total=len(loader), desc="Training epoch : {} / {}".format(epoch, args.epochs),
-            postfix={"loss": 0, "lr": args.learning_rate, "average time": 0}, disable=not show_pbar) as pbar:
+            postfix={"loss": 0, "lr": stats["lr"], "average time": 0}, disable=not show_pbar) as pbar:
         for step, x in enumerate(loader):
             # pbar.update(step + 1)
             x, metadata, _ = x
@@ -655,7 +655,9 @@ for epoch in range(start_epoch, args.epochs):
                     "loss": stats["validation_loss"],
                     "average_time": stats["average_valid_epoch_duration"]})
             pbar.update(1)
-        
+    if args.reduce_lr:
+        scheduler.step()
+
     if use_board:
         board.update_plot("validation loss", epoch, stats["validation_loss"])
     for name in evaluation_metrics.keys():
@@ -671,8 +673,6 @@ for epoch in range(start_epoch, args.epochs):
     if args.evaluate and epoch == args.epochs - 1:
         print(stats)
         torch.save(model.state_dict(), os.path.join(checkpoint_dir, "model.pth"))
-    if args.reduce_lr:
-        scheduler.step()
         # scheduler.step()
     #     state = dict(epoch=epoch + 1,
     #                 model=model.state_dict(),

@@ -182,8 +182,11 @@ if args.start_epoch > 1:
         if len(old_run_id) > 1 and args.run_id == -1:
             raise ValueError("Parameters are ambiguous. You should provide a "
                              "run id to know what training to resume.")
+        elif args.run_id != -1:
+            run_id = args.run_id
         else:
             run_id = old_run_id.item()
+            
 else:
     setups = pd.concat([
         setups,
