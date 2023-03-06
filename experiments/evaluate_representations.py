@@ -133,8 +133,12 @@ else:
     cases = cases(128, 1024)
     best_cp_per_case = dict()
     for setup_id in setups["id"].values:
-        params, epoch, param, best_value = setups[setups["id"] == setup_id][
+        params, epoch, best_param, best_value = setups[setups["id"] == setup_id][
             ["args", "best_epoch", "best_param", "best_value"]].values[0]
+        compute_stds = False
+        same_params_setups = setups[setups["args"] == params]
+        if len(same_params_setups) > 1:
+            compute_stds = True
         local_args = params_from_args(params, args)
         if not hasattr(local_args, "algo"):
             local_args.algo = "barlow"
@@ -146,38 +150,84 @@ else:
             local_args.projector = "256-512-512" if local_args.algo == "barlow" else "256-128"
         case = matching_args_to_case(local_args, cases)
         if case is not None and epoch > 0 and local_args.ico_order == 5:
-            pretrained_path = os.path.join(
-                "/".join(args.setups_file.split("/")[:-1]),
-                "checkpoints", str(setup_id),
-                "model_epoch_{}.pth".format(int(epoch)))
-            if int(setup_id) < 10000:
-                pretrained_path = params
-                pretrained_path = pretrained_path.replace(
-                    "encoder.pth", "model_epoch_{}.pth".format(int(epoch)))
-            checkpoint = torch.load(pretrained_path)
-            checkpoint = encoder_cp_from_model_cp(checkpoint)
-            validation_metrics_path = os.path.join(
-                "/".join(pretrained_path.split("/")[:-1]),
-                "validation_metrics.json")
-            # if os.path.exists(validation_metrics_path):
-                # with open(validation_metrics_path, "r") as f:
-                #     validation_metrics = json.load(f)
-            # best_metric = validation_metrics[validation_metric][
-                #regressor_params.index(param)][
-                #validation_metrics["epochs"].index(epoch)]
-            best_metric = best_value
-            if case not in best_cp_per_case.keys():
-                best_cp_per_case[case] = (
-                    setup_id, checkpoint, best_metric)
-            if ((best_cp_per_case[case][2] > best_metric and best_is_low)
-                or (best_cp_per_case[case][2] < best_metric and
-                    not best_is_low)):
-                best_cp_per_case[case] = (
-                    setup_id, checkpoint, best_metric)
+            if compute_stds:
+                metric_per_epoch_per_param = [[[] for _ in range(int(local_args.epochs / 10))] for _ in regressor_params]
+                setup_ids = []
+                for _setup_id in same_params_setups["id"].values:
+                    cp_path = os.path.join(
+                        "/".join(args.setups_file.split("/")[:-1]),
+                        "checkpoints", str(_setup_id))
+                    validation_metrics_path = os.path.join(
+                        cp_path, "validation_metrics.json")
+                    if not os.path.exists(validation_metrics_path):
+                        continue
+                    with open(validation_metrics_path, "r") as f:
+                        validation_metrics = json.load(f)
+                    for param_idx, _ in enumerate(regressor_params):
+                        for epoch_idx, epoch in enumerate(validation_metrics["epochs"]):
+                            nth_cp = int(epoch / 10) - 1
+                            metric_per_epoch_per_param[param_idx][
+                                nth_cp].append(validation_metrics[
+                                    validation_metric][param_idx][epoch_idx])
+                    setup_ids.append(_setup_id)
+                if len(setup_ids) == 0:
+                    continue
+                average_metric_per_epoch_per_param = np.mean(
+                    metric_per_epoch_per_param, axis=2)
+                best_epoch_per_param_index = np.argsort(
+                    average_metric_per_epoch_per_param)[
+                        :, 0 if best_is_low else -1]
+                best_param_idx = np.argsort(average_metric_per_epoch_per_param[
+                    list(range(len(regressor_params))), best_epoch_per_param_index])[
+                        0 if best_is_low else -1]
+                best_value = average_metric_per_epoch_per_param[
+                    best_param_idx][best_epoch_per_param_index[best_param_idx]]
+                best_param = regressor_params[best_param_idx]
+                best_epoch = int((best_epoch_per_param_index[
+                    best_param_idx] + 1) * 10)
+                checkpoints = []
+                for _setup_id in setup_ids:
+                    cp_path = os.path.join(
+                        "/".join(args.setups_file.split("/")[:-1]),
+                        "checkpoints", str(_setup_id),
+                        f"model_epoch_{best_epoch}.pth")
+                    checkpoint = torch.load(cp_path)
+                    checkpoint = encoder_cp_from_model_cp(checkpoint)
+                    checkpoints.append(checkpoint)
+                if case not in best_cp_per_case.keys():
+                    best_cp_per_case[case] = (
+                        setup_ids, checkpoints, best_value, best_param)
+                if ((best_cp_per_case[case][2] > best_value and best_is_low)
+                    or (best_cp_per_case[case][2] < best_value and
+                        not best_is_low) or len(best_cp_per_case[case][0]) < len(setup_ids)):
+                    best_cp_per_case[case] = (
+                        setup_ids, checkpoints, best_value, best_param)
+            else:
+                pretrained_path = os.path.join(
+                    "/".join(args.setups_file.split("/")[:-1]),
+                    "checkpoints", str(setup_id),
+                    "model_epoch_{}.pth".format(int(epoch)))
+                if int(setup_id) < 10000:
+                    pretrained_path = params
+                    pretrained_path = pretrained_path.replace(
+                        "encoder.pth", "model_epoch_{}.pth".format(int(epoch)))
+                checkpoint = torch.load(pretrained_path)
+                checkpoint = encoder_cp_from_model_cp(checkpoint)
+                
+                if case not in best_cp_per_case.keys():
+                    best_cp_per_case[case] = (
+                        [setup_id], [checkpoint], best_value, best_param)
+                if ((best_cp_per_case[case][2] > best_value and best_is_low)
+                    or (best_cp_per_case[case][2] < best_value and
+                        not best_is_low) and len(best_cp_per_case[case][0]) <= 1):
+                    best_cp_per_case[case] = (
+                        [setup_id], [checkpoint], best_value, best_param)
     checkpoints = [best_cp_per_case[case][1] for case in cases.keys()
                    if case in best_cp_per_case.keys()]
     setup_ids = [best_cp_per_case[case][0] for case in cases.keys()
                  if case in best_cp_per_case.keys()]
+    best_regressor_params = [best_cp_per_case[case][3] for case in cases.keys()
+                             if case in best_cp_per_case.keys()]
     cases_names = [case for case in cases.keys()
                    if case in best_cp_per_case.keys()]
 
@@ -359,267 +409,276 @@ else:
 
 for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
     print(f"Best setup for case {cases_names[case_id]} : {setup_id}")
-    params, best_param = setups[setups["id"] == setup_id][["args", "best_param"]].values[0]
-    local_args = params_from_args(params, args)
-    best_params["regression"]["alpha"] = best_param
+    case_final_perfs = {name: [] for name in (
+        list(evaluation_metrics) + list(evaluation_against_real_metric))}
+    for setup_idx, _setup_id in enumerate(setup_id):
+        params = setups[setups["id"] == _setup_id]["args"].values[0]
+        local_args = params_from_args(params, args)
+        best_params["regression"]["alpha"] = best_regressor_params[case_id] 
 
-    conv_filters = [int(num) for num in local_args.conv_filters.split("-")]
+        conv_filters = [int(num) for num in local_args.conv_filters.split("-")]
 
-    if not hasattr(local_args, "ico_order"):
-        local_args.ico_order = len(conv_filters) + 1
+        if not hasattr(local_args, "ico_order"):
+            local_args.ico_order = len(conv_filters) + 1
 
-    encoder = SphericalHemiFusionEncoder(
-        n_features, local_args.ico_order, local_args.latent_dim,
-        fusion_level=local_args.fusion_level, conv_flts=conv_filters,
-        activation=local_args.activation, batch_norm=local_args.batch_norm,
-        conv_mode="DiNe",
-        cachedir=os.path.join(args.outdir, "cached_ico_infos"))
-    
-    on_the_fly_transform = None
-
-    # if scaling creating scalers for train, test and if there are valid folds
-    scaling = local_args.standardize
-    if scaling and validation is None:
-        scalers = {mod: None for mod in modalities}
-        for modality in modalities:
-            datadir = args.datadir
-            if args.to_predict == "age" and args.data == "privatebhb":
-                datadir = datadir.replace(args.data, local_args.data_train)
-            path_to_scaler = os.path.join(
-                datadir, f"{modality}_scaler.save")
-            scaler = joblib.load(path_to_scaler)
-            scalers[modality] =  transforms.Compose([
-                Reshape((1, -1)),
-                scaler.transform,
-                transforms.ToTensor(),
-                torch.squeeze,
-                Reshape(input_shape),
-            ])
-    elif validation is not None:
-        scalers = dict(train=[])
+        encoder = SphericalHemiFusionEncoder(
+            n_features, local_args.ico_order, local_args.latent_dim,
+            fusion_level=local_args.fusion_level, conv_flts=conv_filters,
+            activation=local_args.activation, batch_norm=local_args.batch_norm,
+            conv_mode="DiNe",
+            cachedir=os.path.join(args.outdir, "cached_ico_infos"))
         
-        for fold in range(validation):
-            scalers["train"].append({mod: None for mod in modalities})
+        on_the_fly_transform = None
+
+        # if scaling creating scalers for train, test and if there are valid folds
+        scaling = local_args.standardize
+        if scaling and validation is None:
+            scalers = {mod: None for mod in modalities}
             for modality in modalities:
                 datadir = args.datadir
+                if args.to_predict == "age" and args.data == "privatebhb":
+                    datadir = datadir.replace(args.data, local_args.data_train)
                 path_to_scaler = os.path.join(
-                    datadir, f"{modality}_scaler_fold_{fold}.save")
+                    datadir, f"{modality}_scaler.save")
                 scaler = joblib.load(path_to_scaler)
-                scalers["train"][fold][modality] =  transforms.Compose([
+                scalers[modality] =  transforms.Compose([
                     Reshape((1, -1)),
                     scaler.transform,
                     transforms.ToTensor(),
                     torch.squeeze,
                     Reshape(input_shape),
                 ])
-        scalers["train"].append({mod: None for mod in modalities})
-        scalers["test"] = {mod: None for mod in modalities}
-        for modality in modalities:
-            datadir = args.datadir
-            path_to_scaler = os.path.join(
-                datadir, f"{modality}_scaler.save")
-            scaler = joblib.load(path_to_scaler)
-            scaler_transform =  transforms.Compose([
-                Reshape((1, -1)),
-                scaler.transform,
-                transforms.ToTensor(),
-                torch.squeeze,
-                Reshape(input_shape),
-            ])
-            scalers["train"][-1][modality] = scaler_transform
-            scalers["test"][modality] = scaler_transform
+        elif validation is not None:
+            scalers = dict(train=[])
+            
+            for fold in range(validation):
+                scalers["train"].append({mod: None for mod in modalities})
+                for modality in modalities:
+                    datadir = args.datadir
+                    path_to_scaler = os.path.join(
+                        datadir, f"{modality}_scaler_fold_{fold}.save")
+                    scaler = joblib.load(path_to_scaler)
+                    scalers["train"][fold][modality] =  transforms.Compose([
+                        Reshape((1, -1)),
+                        scaler.transform,
+                        transforms.ToTensor(),
+                        torch.squeeze,
+                        Reshape(input_shape),
+                    ])
+            scalers["train"].append({mod: None for mod in modalities})
+            scalers["test"] = {mod: None for mod in modalities}
+            for modality in modalities:
+                datadir = args.datadir
+                path_to_scaler = os.path.join(
+                    datadir, f"{modality}_scaler.save")
+                scaler = joblib.load(path_to_scaler)
+                scaler_transform =  transforms.Compose([
+                    Reshape((1, -1)),
+                    scaler.transform,
+                    transforms.ToTensor(),
+                    torch.squeeze,
+                    Reshape(input_shape),
+                ])
+                scalers["train"][-1][modality] = scaler_transform
+                scalers["test"][modality] = scaler_transform
     
-    # Creating on_the_fly transform for train, test and possibly valid folds
-    if validation is None:
-        on_the_fly_transform = dict()
-        for modality in modalities:
-            transformer = Transformer()
-            if scaling:
-                transformer.register(scalers[modality])
-            if local_args.normalize:
-                transformer.register(Normalize())
-            on_the_fly_transform[modality] = transformer
-    else:
-        on_the_fly_transform = dict(train=[], test=dict())
-        for fold in range(validation):
+        # Creating on_the_fly transform for train, test and possibly valid folds
+        if validation is None:
+            on_the_fly_transform = dict()
+            for modality in modalities:
+                transformer = Transformer()
+                if scaling:
+                    transformer.register(scalers[modality])
+                if local_args.normalize:
+                    transformer.register(Normalize())
+                on_the_fly_transform[modality] = transformer
+        else:
+            on_the_fly_transform = dict(train=[], test=dict())
+            for fold in range(validation):
+                on_the_fly_transform["train"].append(dict())
+                for modality in modalities:
+                    transformer = Transformer()
+                    if scaling:
+                        transformer.register(scalers["train"][fold][modality])
+                    if local_args.normalize:
+                        transformer.register(Normalize())
+                    on_the_fly_transform["train"][fold][modality] = transformer
             on_the_fly_transform["train"].append(dict())
             for modality in modalities:
                 transformer = Transformer()
                 if scaling:
-                    transformer.register(scalers["train"][fold][modality])
+                    transformer.register(scalers["train"][-1][modality])
                 if local_args.normalize:
                     transformer.register(Normalize())
-                on_the_fly_transform["train"][fold][modality] = transformer
-        on_the_fly_transform["train"].append(dict())
-        for modality in modalities:
-            transformer = Transformer()
-            if scaling:
-                transformer.register(scalers["train"][-1][modality])
-            if local_args.normalize:
-                transformer.register(Normalize())
-            on_the_fly_transform["train"][-1][modality] = transformer
-            on_the_fly_transform["test"][modality] = transformer
-    
-    if args.to_predict == "age" and args.data == "privatebhb":
-        train_datadir = args.datadir.replace(args.data, local_args.data_train)
-        dataset = DataManager(
-            dataset=local_args.data_train, datasetdir=train_datadir,
-            modalities=modalities, stratify=stratify,
-            discretize=["age"], transform=transform,
-            on_the_fly_transform=on_the_fly_transform,
-            overwrite=False, test_size="defaults", **kwargs)
-
-        test_dataset = DataManager(
-            dataset=args.data, datasetdir=args.datadir, modalities=all_modalities,
-            transform=transform, on_the_fly_transform=on_the_fly_transform,
-            overwrite=False, test_size=0, **kwargs)
-        dataset.test_dataset = test_dataset["train"]
-    else:
-        dataset = DataManager(
-            dataset=args.data, datasetdir=args.datadir, modalities=all_modalities,
-            stratify=stratify, discretize=["age"], validation=validation,
-            transform=transform, on_the_fly_transform=on_the_fly_transform,
-            overwrite=False, test_size=test_size, **kwargs)
-    if local_args.data_train == args.data:
-        dataset.create_val_from_test(
-            val_size=0.5, stratify=["sex", "age", "site"], discretize=["age"])
-    
-    all_metrics = {}
-    for name in evaluation_metrics.keys():
-        all_metrics[name] = []
-    for name in evaluation_against_real_metric.keys():
-        all_metrics[name] = []
-
-    params = params_for_validation[args.method]
-    param_name = list(params)[0]
-    for value_idx, value in enumerate(params[param_name]):
-        for name in all_metrics.keys():
-            all_metrics[name].append([])
-
-    run_name = (
-        "deepint_evaluate_representations_to_predict_{}_{}_predict_via_{}"
-        "_pretrained_{}_case_{}").format(
-            args.data, args.to_predict, args.method, setup_id,
-            None if args.pretrained_setup != "None" else list(cases)[case_id])
-
-    resdir = os.path.join(resdir, run_name)
-    if not os.path.isdir(resdir):
-        os.makedirs(resdir)
-
-    valid_loaders = []
-    if validation is None:
-        train_loaders = [torch.utils.data.DataLoader(
-            dataset["train"], batch_size=batch_size, num_workers=6,
-            pin_memory=True, shuffle=True)]
-    else:
-        train_loaders = []
-        for fold in range(validation):
-            train_loaders.append(torch.utils.data.DataLoader(
-                dataset["train"][fold]["train"], batch_size=batch_size,
-                num_workers=6, pin_memory=True, shuffle=True))
-            valid_loaders.append(torch.utils.data.DataLoader(
-                dataset["train"][fold]["valid"], batch_size=batch_size,
-                num_workers=6, pin_memory=True, shuffle=True))
-    test_dataset = dataset["test"]
-    if local_args.data_train == args.data:
-        test_dataset = test_dataset["test"]
-    test_loader = torch.utils.data.DataLoader(
-        test_dataset, batch_size=batch_size, num_workers=6,
-        pin_memory=True, shuffle=True)
-
-    encoder.load_state_dict(checkpoint)
-
-
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = encoder.to(device)
-
-    model.eval()
-    for fold, (train_loader, test_loader) in enumerate(
-        zip(train_loaders, valid_loaders + [test_loader])):
-        latents = []
-        transformed_ys = []
-        ys = []
-        for step, x in enumerate(train_loader):
-            x, metadata, _ = x
-            left_x = x["surface-lh"].float().to(device, non_blocking=True)
-            right_x = x["surface-rh"].float().to(device, non_blocking=True)
-            if args.to_predict in metadata.keys():
-                y = metadata[args.to_predict]
-            else:
-                y = x["clinical"][:, index_to_predict]
-            new_y = label_prepro.transform(np.array(y)[:, np.newaxis])
-            transformed_ys.append(new_y)
-            ys.append(y)
-            with torch.cuda.amp.autocast():
-                data = (left_x, right_x)
-                latents.append(model(data).squeeze().detach().cpu().numpy())
-        Y = np.concatenate(transformed_ys)
-        real_y = np.concatenate(ys)
-        X = np.concatenate(latents)
+                on_the_fly_transform["train"][-1][modality] = transformer
+                on_the_fly_transform["test"][modality] = transformer
         
-        test_latents = []
-        test_ys = []
-        test_transformed_ys = []
-        for step, x in enumerate(test_loader):
-            x, metadata, _ = x
-            left_x = x["surface-lh"].float().to(device, non_blocking=True)
-            right_x = x["surface-rh"].float().to(device, non_blocking=True)
-            if args.to_predict in metadata.keys():
-                y = metadata[args.to_predict]
-            else:
-                y = x["clinical"][:, index_to_predict]
-            new_y = label_prepro.transform(np.array(y)[:, np.newaxis])
-            test_ys.append(y)
-            test_transformed_ys.append(new_y)
-            with torch.cuda.amp.autocast():
-                data = (left_x, right_x)
-                test_latents.append(model(data).squeeze().detach().cpu().numpy())
-        X_test = np.concatenate(test_latents)
-        Y_test = np.concatenate(test_transformed_ys)
-        real_y_test = np.concatenate(test_ys)
+        if args.to_predict == "age" and args.data == "privatebhb":
+            train_datadir = args.datadir.replace(args.data, local_args.data_train)
+            dataset = DataManager(
+                dataset=local_args.data_train, datasetdir=train_datadir,
+                modalities=modalities, stratify=stratify,
+                discretize=["age"], transform=transform,
+                on_the_fly_transform=on_the_fly_transform,
+                overwrite=False, test_size="defaults", **kwargs)
 
-        if fold < len(train_loaders) - 1:
-            params = params_for_validation[args.method]
-            param_name = list(params)[0]
-            for value_idx, value in enumerate(params[param_name]):
-                local_params = {param_name: value}
-                if args.method == "classification":
-                    local_params["max_iter"] = 10000
-                local_regressor = regressor(**local_params)
+            test_dataset = DataManager(
+                dataset=args.data, datasetdir=args.datadir, modalities=all_modalities,
+                transform=transform, on_the_fly_transform=on_the_fly_transform,
+                overwrite=False, test_size=0, **kwargs)
+            dataset.test_dataset = test_dataset["train"]
+        else:
+            dataset = DataManager(
+                dataset=args.data, datasetdir=args.datadir, modalities=all_modalities,
+                stratify=stratify, discretize=["age"], validation=validation,
+                transform=transform, on_the_fly_transform=on_the_fly_transform,
+                overwrite=False, test_size=test_size, **kwargs)
+        if local_args.data_train == args.data:
+            dataset.create_val_from_test(
+                val_size=0.5, stratify=["sex", "age", "site"], discretize=["age"])
+    
+        all_metrics = {}
+        for name in evaluation_metrics.keys():
+            all_metrics[name] = []
+        for name in evaluation_against_real_metric.keys():
+            all_metrics[name] = []
+
+        params = params_for_validation[args.method]
+        param_name = list(params)[0]
+        for value_idx, value in enumerate(params[param_name]):
+            for name in all_metrics.keys():
+                all_metrics[name].append([])
+
+        run_name = (
+            "deepint_evaluate_representations_to_predict_{}_{}_predict_via_{}"
+            "_pretrained_{}_case_{}").format(
+                args.data, args.to_predict, args.method, setup_id,
+                None if args.pretrained_setup != "None" else list(cases)[case_id])
+
+        resdir = os.path.join(resdir, run_name)
+        if not os.path.isdir(resdir):
+            os.makedirs(resdir)
+
+        valid_loaders = []
+        if validation is None:
+            train_loaders = [torch.utils.data.DataLoader(
+                dataset["train"], batch_size=batch_size, num_workers=6,
+                pin_memory=True, shuffle=True)]
+        else:
+            train_loaders = []
+            for fold in range(validation):
+                train_loaders.append(torch.utils.data.DataLoader(
+                    dataset["train"][fold]["train"], batch_size=batch_size,
+                    num_workers=6, pin_memory=True, shuffle=True))
+                valid_loaders.append(torch.utils.data.DataLoader(
+                    dataset["train"][fold]["valid"], batch_size=batch_size,
+                    num_workers=6, pin_memory=True, shuffle=True))
+        test_dataset = dataset["test"]
+        if local_args.data_train == args.data:
+            test_dataset = test_dataset["test"]
+        test_loader = torch.utils.data.DataLoader(
+            test_dataset, batch_size=batch_size, num_workers=6,
+            pin_memory=True, shuffle=True)
+
+        encoder.load_state_dict(checkpoint[setup_idx])
+
+
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        model = encoder.to(device)
+
+        model.eval()
+        for fold, (train_loader, test_loader) in enumerate(
+            zip(train_loaders, valid_loaders + [test_loader])):
+            latents = []
+            transformed_ys = []
+            ys = []
+            for step, x in enumerate(train_loader):
+                x, metadata, _ = x
+                left_x = x["surface-lh"].float().to(device, non_blocking=True)
+                right_x = x["surface-rh"].float().to(device, non_blocking=True)
+                if args.to_predict in metadata.keys():
+                    y = metadata[args.to_predict]
+                else:
+                    y = x["clinical"][:, index_to_predict]
+                new_y = label_prepro.transform(np.array(y)[:, np.newaxis])
+                transformed_ys.append(new_y)
+                ys.append(y)
+                with torch.cuda.amp.autocast():
+                    data = (left_x, right_x)
+                    latents.append(model(data).squeeze().detach().cpu().numpy())
+            Y = np.concatenate(transformed_ys)
+            real_y = np.concatenate(ys)
+            X = np.concatenate(latents)
+            
+            test_latents = []
+            test_ys = []
+            test_transformed_ys = []
+            for step, x in enumerate(test_loader):
+                x, metadata, _ = x
+                left_x = x["surface-lh"].float().to(device, non_blocking=True)
+                right_x = x["surface-rh"].float().to(device, non_blocking=True)
+                if args.to_predict in metadata.keys():
+                    y = metadata[args.to_predict]
+                else:
+                    y = x["clinical"][:, index_to_predict]
+                new_y = label_prepro.transform(np.array(y)[:, np.newaxis])
+                test_ys.append(y)
+                test_transformed_ys.append(new_y)
+                with torch.cuda.amp.autocast():
+                    data = (left_x, right_x)
+                    test_latents.append(model(data).squeeze().detach().cpu().numpy())
+            X_test = np.concatenate(test_latents)
+            Y_test = np.concatenate(test_transformed_ys)
+            real_y_test = np.concatenate(test_ys)
+
+            if fold < len(train_loaders) - 1:
+                params = params_for_validation[args.method]
+                param_name = list(params)[0]
+                for value_idx, value in enumerate(params[param_name]):
+                    local_params = {param_name: value}
+                    if args.method == "classification":
+                        local_params["max_iter"] = 10000
+                    local_regressor = regressor(**local_params)
+                    local_regressor.fit(X, Y)
+                    y_hat = local_regressor.predict(X_test)
+
+                    preds = out_to_pred_func(y_hat)
+                    real_preds = out_to_real_pred_func(y_hat)
+
+                    for name, metric in evaluation_metrics.items():
+                        all_metrics[name][value_idx].append(metric(Y_test, preds))
+                    for name, metric in evaluation_against_real_metric.items():
+                        all_metrics[name][value_idx].append(metric(real_y_test, real_preds))
+            elif len(train_loaders) > 1:
+                for value_idx, value in enumerate(params[param_name]):
+                    for metric in all_metrics.keys():
+                        all_metrics[metric][value_idx] = np.mean(all_metrics[metric][value_idx])
+                sorted_index = np.argsort(all_metrics[validation_metric])
+                best_value = np.array(params[param_name])[sorted_index][0 if best_is_low else -1]
+                best_params[args.method][param_name] = best_value
+            if fold == len(train_loaders) - 1:
+                local_regressor = regressor(**best_params[args.method])
                 local_regressor.fit(X, Y)
                 y_hat = local_regressor.predict(X_test)
 
                 preds = out_to_pred_func(y_hat)
                 real_preds = out_to_real_pred_func(y_hat)
-
+                
+                final_value_per_metric = {}
                 for name, metric in evaluation_metrics.items():
-                    all_metrics[name][value_idx].append(metric(Y_test, preds))
+                    final_value_per_metric[name] = metric(Y_test, preds)
                 for name, metric in evaluation_against_real_metric.items():
-                    all_metrics[name][value_idx].append(metric(real_y_test, real_preds))
-        elif len(train_loaders) > 1:
-            for value_idx, value in enumerate(params[param_name]):
-                for metric in all_metrics.keys():
-                    all_metrics[metric][value_idx] = np.mean(all_metrics[metric][value_idx])
-            sorted_index = np.argsort(all_metrics[validation_metric])
-            best_value = np.array(params[param_name])[sorted_index][0 if best_is_low else -1]
-            best_params[args.method][param_name] = best_value
-        if fold == len(train_loaders) - 1:
-            local_regressor = regressor(**best_params[args.method])
-            local_regressor.fit(X, Y)
-            y_hat = local_regressor.predict(X_test)
+                    final_value_per_metric[name] = metric(real_y_test, real_preds)
 
-            preds = out_to_pred_func(y_hat)
-            real_preds = out_to_real_pred_func(y_hat)
-            
-            final_value_per_metric = {}
-            final_std_per_metric = {}
-            for name, metric in evaluation_metrics.items():
-                final_value_per_metric[name] = metric(Y_test, preds)
-            for name, metric in evaluation_against_real_metric.items():
-                final_value_per_metric[name] = metric(real_y_test, real_preds)
 
-    
-    for metric in final_value_per_metric.keys():
-        print(final_value_per_metric[metric])
-    with open(os.path.join(resdir, 'final_values.json'), 'w') as fp:
-        json.dump(final_value_per_metric, fp)
+        for metric in final_value_per_metric.keys():
+            final_value = final_value_per_metric[metric]
+            # print(final_value)
+            case_final_perfs[metric].append(final_value)
+        with open(os.path.join(resdir, 'final_values.json'), 'w') as fp:
+            json.dump(final_value_per_metric, fp)
+    for metric in case_final_perfs.keys():
+        final_value = np.mean(case_final_perfs[metric])
+        final_std = np.std(case_final_perfs[metric])
+        print(f"Test {metric} {final_value} +- {final_std}")
+        

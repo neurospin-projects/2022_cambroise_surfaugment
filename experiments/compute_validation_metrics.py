@@ -167,7 +167,7 @@ for setup_id in setups["id"].values:
     last_checkpoint = os.path.join(checkpoints_path,
                                    f"model_epoch_{local_args.epochs}.pth")
 
-    if (local_args.ico_order != 5 #or os.path.exists(path_to_metrics)
+    if (local_args.ico_order != 5 or os.path.exists(path_to_metrics)
         or not os.path.exists(checkpoints_path)
         or not os.path.exists(last_checkpoint)):
         continue
