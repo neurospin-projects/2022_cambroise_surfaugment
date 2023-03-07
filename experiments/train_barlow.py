@@ -368,11 +368,11 @@ for modality in modalities:
             transformer.register(trf, probability=0.5)
     if args.noise:
         trf = SphericalNoise(sigma=(0.1, 2))
-        # if args.algo == "barlow":
-        #     transformer.register(trf, pipeline="hard")
-        #     transformer.register(trf, probability=0.1, pipeline="soft")
-        # else:
-        transformer.register(trf, probability=0.5)
+        if args.algo == "barlow":
+            transformer.register(trf, pipeline="hard")
+            transformer.register(trf, probability=0.1, pipeline="soft")
+        else:
+            transformer.register(trf, probability=0.5)
     if args.cutout:
         ico = backbone.ico[args.ico_order]
         t = time.time()
@@ -382,11 +382,11 @@ for modality in modalities:
             patch_size=patch_size,
             cachedir=os.path.join(args.outdir, "cached_ico_infos"))
         # print(time.time() - t)
-        # if args.algo == "barlow":
-        #     transformer.register(trf, pipeline="hard")
-        #     transformer.register(trf, probability=0.5, pipeline="soft")
-        # else:
-        transformer.register(trf, probability=0.5)
+        if args.algo == "barlow":
+            transformer.register(trf, pipeline="hard")
+            transformer.register(trf, probability=0.5, pipeline="soft")
+        else:
+            transformer.register(trf, probability=0.5)
     on_the_fly_transform[modality] = transformer
 
 if args.inter_modal_augment > 0:

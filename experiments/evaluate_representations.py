@@ -371,7 +371,7 @@ out_to_pred_func = lambda x: x
 out_to_real_pred_func = lambda x: x
 root_mean_squared_error = lambda x, y: mean_squared_error(x, y, squared=False)
 evaluation_against_real_metric = {
-    "real_mae": mean_absolute_error,
+    "mae": mean_absolute_error,
     "r2": r2_score, "correlation": corr_metric}
 if args.method == "regression":
     output_dim = 1
@@ -379,14 +379,13 @@ if args.method == "regression":
     label_prepro = StandardScaler()
     label_prepro.fit(all_label_data[:, np.newaxis])
     
-    evaluation_metrics = {"mae": mean_absolute_error}
+    evaluation_metrics = {}#"mae": mean_absolute_error}
     regressor = Ridge
     out_to_real_pred_func = lambda x: label_prepro.inverse_transform(x).squeeze()
 else:
     output_dim = len(label_values)
     evaluation_metrics = {"accuracy": accuracy_score,
-                          "bacc": balanced_accuracy_score,
-                          "auc": roc_auc_score}
+                          "bacc": balanced_accuracy_score}
     tensor_type = "long"
     n_bins = 3
     label_prepro = TransparentProcessor()
@@ -396,13 +395,13 @@ else:
         label_prepro.fit(all_label_data[:, np.newaxis])
         out_to_real_pred_func = lambda x : label_prepro.inverse_transform(
             x.argmax(1).cpu().detach().unsqueeze(1).numpy()).squeeze()
-    if output_dim > n_bins:
-        label_prepro = KBinsDiscretizer(n_bins=n_bins, encode="ordinal")
-        label_prepro.fit(all_label_data[:, np.newaxis])
-        print(label_prepro.bin_edges_)
-        output_dim = n_bins
+    # if output_dim > n_bins:
+    #     label_prepro = KBinsDiscretizer(n_bins=n_bins, encode="ordinal")
+    #     label_prepro.fit(all_label_data[:, np.newaxis])
+    #     print(label_prepro.bin_edges_)
+    #     output_dim = n_bins
     evaluation_against_real_metric = {}
-    validation_metric = "auc"
+    validation_metric = "bacc"
     best_is_low = False
     # out_to_pred_func = lambda x: x.argmax(1).cpu().detach().numpy()
     regressor = LogisticRegression
