@@ -102,6 +102,9 @@ parser.add_argument(
     "--inter-modal-augment", "-ima", default=0.0, type=float,
     help="optionnally uses inter modality augment.")
 parser.add_argument(
+    "--momentum", default=0.0, type=float,
+    help="optionnally uses SGD with momentum.")
+parser.add_argument(
     "--reduce-lr", action="store_true",
     help="optionnally reduces the learning rate during training.")
 parser.add_argument(
@@ -172,17 +175,9 @@ if args.pretrained_setup != "None":
     args.epochs, args.learning_rate, args.reduce_lr = epochs, lr, reduce_lr
     checkpoint = torch.load(pretrained_path)
     checkpoint = encoder_cp_from_barlow_cp(checkpoint)
-# else:
-#     args.n_features = len(metrics)
-#     args.fusion_level = 1
-#     args.activation = "ReLU"
-#     args.standardize = True
-#     args.normalize = False
-#     args.batch_norm = False
-#     args.conv_filters = [128, 128, 256, 256]
-#     args.gaussian_blur_augment = False
-#     args.cutout = False
+
 args.conv_filters = [int(item) for item in args.conv_filters.split("-")]
+args.batch_size = 256
 
 input_shape = (len(metrics), len(ico_verts))
 
@@ -236,14 +231,14 @@ kwargs = {
 stratify = ["sex", "age", "site"]
 if args.to_predict == "asd":
     stratify.append("asd")
-
+all_modalities = modalities.copy()
 if args.data in ["hbn", "euaims"]:
     kwargs["surface-lh"]["symetrized"] = True
 
     kwargs["surface-rh"]["symetrized"] = True
 
     if args.to_predict not in stratify:
-        modalities.append("clinical")
+        all_modalities.append("clinical")
     test_size = 0.2
 
 if args.data == "openbhb":
@@ -252,7 +247,7 @@ if args.data == "openbhb":
 n_folds = None
 
 dataset = DataManager(dataset=args.data, datasetdir=args.datadir,
-                      modalities=modalities, validation=n_folds,
+                      modalities=all_modalities, validation=n_folds,
                       stratify=stratify, discretize=["age"],
                       transform=transform, on_the_fly_transform=on_the_fly_transform,
                       overwrite=False, test_size=test_size, **kwargs)
@@ -261,8 +256,8 @@ dataset.create_val_from_test(
 
 
 loader = torch.utils.data.DataLoader(
-    dataset["train"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-    shuffle=True)
+    dataset["train"], batch_size=args.batch_size, num_workers=6,
+    pin_memory=True, shuffle=True)
 valid_loader = torch.utils.data.DataLoader(
     dataset["test"]["valid"], batch_size=args.batch_size, num_workers=6,
     pin_memory=True, shuffle=True)
@@ -286,7 +281,7 @@ class TransparentProcessor(object):
         return x
 
 all_label_data = []
-if "clinical" in modalities:
+if "clinical" in all_modalities:
     clinical_names = np.load(os.path.join(args.datadir, "clinical_names.npy"), allow_pickle=True)
     # print(clinical_names)
 
@@ -348,8 +343,7 @@ elif args.method == "classification":
     evaluation_against_real_metric = {}
     out_to_pred_func = lambda x: x.argmax(1).cpu().detach().numpy()
 
-im_shape = next(iter(loader))[0]["surface-lh"][0].shape
-n_features = im_shape[0]
+n_features = len(metrics)
 
 
 activation = "ReLU"
@@ -532,9 +526,13 @@ print("Number of trainable parameters : ",
 
 optimizer = optim.Adam(model.parameters(), args.learning_rate,
                     weight_decay=args.weight_decay)
+if args.momentum > 0:
+    optimizer = optim.SGD(model.parameters(), args.learning_rate,
+        momentum=args.momentum, weight_decay=args.weight_decay)
 
 if args.reduce_lr:
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.8)
+    # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.8)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, len(loader) * args.epochs)
 # if args.momentum > 0:
 #     optimizer = optim.SGD(model.parameters(), lr=args.learning_rate,
 #                         weight_decay=args.weight_decay, momentum=args.momentum)

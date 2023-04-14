@@ -393,8 +393,8 @@ else:
     if any([type(value) is np.str_ for value in label_values]):
         label_prepro = OrdinalEncoder()
         label_prepro.fit(all_label_data[:, np.newaxis])
-        out_to_real_pred_func = lambda x : label_prepro.inverse_transform(
-            x.argmax(1).cpu().detach().unsqueeze(1).numpy()).squeeze()
+        # out_to_real_pred_func = lambda x : label_prepro.inverse_transform(
+        #     x.argmax(1).cpu().detach().unsqueeze(1).numpy()).squeeze()
     # if output_dim > n_bins:
     #     label_prepro = KBinsDiscretizer(n_bins=n_bins, encode="ordinal")
     #     label_prepro.fit(all_label_data[:, np.newaxis])
