@@ -667,7 +667,7 @@ for fold, (train_loader, test_loader) in enumerate(
                     y = metadata[args.to_predict]
                 else:
                     y = x["clinical"][:, index_to_predict]
-                new_y = label_prepro[idx].transform(np.array(y)[:, np.newaxis])
+                new_y = label_prepro[fold].transform(np.array(y)[:, np.newaxis])
                 new_y = getattr(torch.tensor(new_y), tensor_type)().squeeze()
                 new_y = new_y.to(device, non_blocking=True)
                 if args.to_predict == "asd":
@@ -678,7 +678,7 @@ for fold, (train_loader, test_loader) in enumerate(
                     y_hat = model(X).squeeze()
                     loss = criterion(y_hat, new_y)
                     preds = out_to_pred_func(y_hat)
-                    real_preds = out_to_real_pred_func[idx](y_hat)
+                    real_preds = out_to_real_pred_func[fold](y_hat)
 
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
@@ -719,7 +719,7 @@ for fold, (train_loader, test_loader) in enumerate(
                     y = metadata[args.to_predict]
                 else:
                     y = x["clinical"][:, index_to_predict]
-                new_y = label_prepro[idx].transform(np.array(y)[:, np.newaxis])
+                new_y = label_prepro[fold].transform(np.array(y)[:, np.newaxis])
                 new_y = getattr(torch.tensor(new_y), tensor_type)().squeeze()
                 new_y = new_y.to(device, non_blocking=True)
                 if args.to_predict == "asd":
@@ -730,7 +730,7 @@ for fold, (train_loader, test_loader) in enumerate(
                         y_hat = model(X).squeeze()
                         loss = criterion(y_hat, new_y)
                         preds = out_to_pred_func(y_hat)
-                        real_preds = out_to_real_pred_func[idx](y_hat)
+                        real_preds = out_to_real_pred_func[fold](y_hat)
 
                 epoch_duration = time.time() - start_batch_time
                 stats.update({
