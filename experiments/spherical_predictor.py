@@ -616,7 +616,10 @@ for fold, (train_loader, test_loader) in enumerate(
     model = model.to(device)
 
     checkpoint_path = os.path.join(
-        checkpoint_dir, f"fold_{fold}", "model_epoch_{}.pth")
+        checkpoint_dir, f"fold_{fold}")
+    if not os.path.isdir(checkpoint_path):
+        os.makedirs(checkpoint_path)
+    checkpoint_path = os.path.join(checkpoint_path, "model_epoch_{}.pth")
 
         # print(model)
     print("Number of trainable parameters : ",
