@@ -438,7 +438,7 @@ else:
 n_features = len(metrics)
 
 activation = "ReLU"
-use_board = True
+use_board = False
 show_pbar = True
 
 class SelectNthDim(nn.Module):
@@ -766,6 +766,7 @@ for fold, (train_loader, test_loader) in enumerate(
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
+                "scheduler_state_dict": scheduler.state_dict() if reduce_lr else None,
                 "loss": stats["loss"],
                 "valid_loss": stats["validation_loss"]}
             for name, metric in evaluation_metrics.items():
