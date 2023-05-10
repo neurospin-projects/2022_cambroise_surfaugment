@@ -85,6 +85,9 @@ parser.add_argument(
     "--pretrained-setup", default="None",
     help="the path to the pretrained encoder.")
 parser.add_argument(
+    "--pretrained-epoch", default=None, type=int,
+    help="the pretraining epoch at which to load the model.")
+parser.add_argument(
     "--setups-file", default="None",
     help="the path to the file linking the setups to the pretrained encoder's path.")
 parser.add_argument(
@@ -92,9 +95,8 @@ parser.add_argument(
     help="optionnally freezes the backbone network's weights up to some layer."
 )
 parser.add_argument(
-    "--evaluate", action="store_true",
-    help="Uses the whole training set to train once, and evaluates on the hold-out test set."
-)
+    "--save-freq", default=1, type=int,
+    help="saving frequence (as number of epochs) during training.")
 parser.add_argument(
     "--batch-augment", "-ba", default=0.0, type=float,
     help="optionnally uses batch augmentation.")
@@ -162,6 +164,11 @@ if args.pretrained_setup != "None":
     assert args.setups_file != "None"
     setups = pd.read_table(args.setups_file)
     params, epoch = setups[setups["id"] == int(args.pretrained_setup)][["args", "best_epoch"]].values[0]
+    args = params_from_args(params, args)
+    if args.pretrained_epoch is not None:
+        epoch = args.pretrained_epoch
+        if epoch == -1:
+            epoch = args.epochs
     pretrained_path = os.path.join(
         "/".join(args.setups_file.split("/")[:-1]),
         "checkpoints", args.pretrained_setup,
@@ -171,7 +178,7 @@ if args.pretrained_setup != "None":
         pretrained_path = pretrained_path.replace(
             "encoder.pth", "model_epoch_{}.pth".format(int(epoch)))
     epochs, lr, reduce_lr = args.epochs, args.learning_rate, args.reduce_lr
-    args = params_from_args(params, args)
+    
     args.epochs, args.learning_rate, args.reduce_lr = epochs, lr, reduce_lr
     checkpoint = torch.load(pretrained_path)
     checkpoint = encoder_cp_from_barlow_cp(checkpoint)
@@ -181,11 +188,17 @@ args.batch_size = 256
 
 input_shape = (len(metrics), len(ico_verts))
 
+validation = 5
+
 scaling = args.standardize
-scalers = {mod: None for mod in modalities}
-if scaling:
+normalize = args.normalize
+
+if scaling and validation is None:
+    scalers = {mod: None for mod in modalities}
     for modality in modalities:
-        path_to_scaler = os.path.join(args.datadir, f"{modality}_scaler.save")
+        datadir = args.datadir
+        path_to_scaler = os.path.join(
+            datadir, f"{modality}_scaler.save")
         scaler = joblib.load(path_to_scaler)
         scalers[modality] =  transforms.Compose([
             Reshape((1, -1)),
@@ -194,15 +207,70 @@ if scaling:
             torch.squeeze,
             Reshape(input_shape),
         ])
-normalize = args.normalize
-on_the_fly_transform = dict()
-for modality in modalities:
-    transformer = Transformer()
-    if scaling:
-        transformer.register(scalers[modality])
-    if normalize:
-        transformer.register(Normalize())
-    on_the_fly_transform[modality] = transformer
+elif validation is not None:
+    scalers = dict(train=[])
+    
+    for fold in range(validation):
+        scalers["train"].append({mod: None for mod in modalities})
+        for modality in modalities:
+            datadir = args.datadir
+            path_to_scaler = os.path.join(
+                datadir, f"{modality}_scaler_fold_{fold}.save")
+            scaler = joblib.load(path_to_scaler)
+            scalers["train"][fold][modality] =  transforms.Compose([
+                Reshape((1, -1)),
+                scaler.transform,
+                transforms.ToTensor(),
+                torch.squeeze,
+                Reshape(input_shape),
+            ])
+    scalers["train"].append({mod: None for mod in modalities})
+    scalers["test"] = {mod: None for mod in modalities}
+    for modality in modalities:
+        datadir = args.datadir
+        path_to_scaler = os.path.join(
+            datadir, f"{modality}_scaler.save")
+        scaler = joblib.load(path_to_scaler)
+        scaler_transform =  transforms.Compose([
+            Reshape((1, -1)),
+            scaler.transform,
+            transforms.ToTensor(),
+            torch.squeeze,
+            Reshape(input_shape),
+        ])
+        scalers["train"][-1][modality] = scaler_transform
+        scalers["test"][modality] = scaler_transform
+
+# Creating on_the_fly transform for train, test and possibly valid folds
+if validation is None:
+    on_the_fly_transform = dict()
+    for modality in modalities:
+        transformer = Transformer()
+        if scaling:
+            transformer.register(scalers[modality])
+        if normalize:
+            transformer.register(Normalize())
+        on_the_fly_transform[modality] = transformer
+else:
+    on_the_fly_transform = dict(train=[], test=dict())
+    for fold in range(validation):
+        on_the_fly_transform["train"].append(dict())
+        for modality in modalities:
+            transformer = Transformer()
+            if scaling:
+                transformer.register(scalers["train"][fold][modality])
+            if normalize:
+                transformer.register(Normalize())
+            on_the_fly_transform["train"][fold][modality] = transformer
+    on_the_fly_transform["train"].append(dict())
+    for modality in modalities:
+        transformer = Transformer()
+        if scaling:
+            transformer.register(scalers["train"][-1][modality])
+        if normalize:
+            transformer.register(Normalize())
+        on_the_fly_transform["train"][-1][modality] = transformer
+        on_the_fly_transform["test"][modality] = transformer
 
 # normalize = True
 # if args.inter_modal_augment > 0 or args.batch_augment > 0:
@@ -244,26 +312,44 @@ if args.data in ["hbn", "euaims"]:
 if args.data == "openbhb":
     kwargs["test_size"] = None
 
-n_folds = None
 
 dataset = DataManager(dataset=args.data, datasetdir=args.datadir,
-                      modalities=all_modalities, validation=n_folds,
+                      modalities=all_modalities, validation=validation,
                       stratify=stratify, discretize=["age"],
                       transform=transform, on_the_fly_transform=on_the_fly_transform,
                       overwrite=False, test_size=test_size, **kwargs)
-dataset.create_val_from_test(
-    val_size=0.5, stratify=stratify, discretize=["age"])
+# dataset.create_val_from_test(
+#     val_size=0.5, stratify=stratify, discretize=["age"])
 
 
 loader = torch.utils.data.DataLoader(
     dataset["train"], batch_size=args.batch_size, num_workers=6,
     pin_memory=True, shuffle=True)
-valid_loader = torch.utils.data.DataLoader(
-    dataset["test"]["valid"], batch_size=args.batch_size, num_workers=6,
-    pin_memory=True, shuffle=True)
+
+valid_loaders = []
+if validation is None:
+    train_loaders = [torch.utils.data.DataLoader(
+        dataset["train"], batch_size=args.batch_size, num_workers=6,
+        pin_memory=True, shuffle=True)]
+else:
+    train_loaders = []
+    for fold in range(validation):
+        train_loaders.append(torch.utils.data.DataLoader(
+            dataset["train"][fold]["train"], batch_size=args.batch_size,
+            num_workers=6, pin_memory=True, shuffle=True))
+        valid_loaders.append(torch.utils.data.DataLoader(
+            dataset["train"][fold]["valid"], batch_size=args.batch_size,
+            num_workers=6, pin_memory=True, shuffle=True))
+    train_loaders.append(torch.utils.data.DataLoader(
+            dataset["train"]["all"], batch_size=args.batch_size,
+            num_workers=6, pin_memory=True, shuffle=True))
+test_dataset = dataset["test"]
+# if local_args.data_train == args.data:
+#     test_dataset = test_dataset["test"]
 test_loader = torch.utils.data.DataLoader(
-    dataset["test"]["test"], batch_size=args.batch_size, num_workers=6,
+    test_dataset, batch_size=args.batch_size, num_workers=6,
     pin_memory=True, shuffle=True)
+    
 
 class TransparentProcessor(object):
     def __init__(self):
@@ -284,15 +370,16 @@ all_label_data = []
 if "clinical" in all_modalities:
     clinical_names = np.load(os.path.join(args.datadir, "clinical_names.npy"), allow_pickle=True)
     # print(clinical_names)
-
-for data in loader:
-    data, metadata, _ = data
-    if args.to_predict in metadata.keys():
-        all_label_data.append(metadata[args.to_predict])
-    else:
-        index_to_predict = clinical_names.tolist().index(args.to_predict)
-        all_label_data.append(data["clinical"][:, index_to_predict])
-all_label_data = np.concatenate(all_label_data)
+for idx, loader in enumerate(train_loaders):
+    all_label_data.append([])
+    for data in loader:
+        data, metadata, _ = data
+        if args.to_predict in metadata.keys():
+            all_label_data[idx].append(metadata[args.to_predict])
+        else:
+            index_to_predict = clinical_names.tolist().index(args.to_predict)
+            all_label_data[idx].append(data["clinical"][:, index_to_predict])
+    all_label_data[idx] = np.concatenate(all_label_data[idx])
 label_values = np.unique(all_label_data)
 
 def corr_metric(y_true, y_pred):
@@ -304,55 +391,53 @@ output_activation = nn.Identity()
 hidden_dim = 128
 tensor_type = "float"
 out_to_pred_func = lambda x: x.cpu().detach().numpy()
-out_to_real_pred_func = lambda x: x.cpu().detach().numpy()
+out_to_real_pred_func = []
 root_mean_squared_error = lambda x, y: mean_squared_error(x, y, squared=False)
 evaluation_against_real_metric = {"real_rmse": root_mean_squared_error, "real_mae": mean_absolute_error, "r2": r2_score, "correlation": corr_metric}
+label_prepro = []
 if args.method == "regression":
     output_dim = 1
-    
-    label_prepro = StandardScaler()
-    label_prepro.fit(all_label_data[:, np.newaxis])
+    for idx in range(len(train_loaders)):
+        label_prepro[idx] = StandardScaler()
+        label_prepro[idx].fit(all_label_data[idx][:, np.newaxis])
+        out_to_real_pred_func.append(
+            lambda x: label_prepro[idx].inverse_transform(
+                x.cpu().detach().unsqueeze(1)).squeeze())
     # output_activation = DifferentiableRound(label_prepro.scale_)
-    
+
     criterion = nn.MSELoss()
     if args.loss == "l1":
         criterion = nn.L1Loss()
     evaluation_metrics = {"rmse": root_mean_squared_error, "mae": mean_absolute_error}
-    out_to_real_pred_func = lambda x: label_prepro.inverse_transform(x.cpu().detach().unsqueeze(1)).squeeze()
-elif args.method == "classification":
-
+    
+else:
     output_dim = len(label_values)
     evaluation_metrics = {"accuracy": accuracy_score, "bacc": balanced_accuracy_score,
                           "auc": roc_auc_score}
     tensor_type = "long"
-    n_bins = 3
-    label_prepro = TransparentProcessor()
+    n_bins = 100
     output_activation = nn.Softmax(dim=1)
-    out_to_real_pred_func = lambda x : x.argmax(1).cpu().detach().numpy()
-    if any([type(value) is np.str_ for value in label_values]):
-        label_prepro = OrdinalEncoder()
-        label_prepro.fit(all_label_data[:, np.newaxis])
-        out_to_real_pred_func = lambda x : label_prepro.inverse_transform(
-            x.argmax(1).cpu().detach().unsqueeze(1).numpy()).squeeze()
-    if output_dim > n_bins:
-        label_prepro = KBinsDiscretizer(n_bins=n_bins, encode="ordinal")
-        label_prepro.fit(all_label_data[:, np.newaxis])
-        print(label_prepro.bin_edges_)
-        output_dim = n_bins
+    for idx in range(len(train_loaders)):
+        label_prepro.append(TransparentProcessor())
+        out_to_real_pred_func.append(
+            lambda x : x.argmax(1).cpu().detach().numpy())
+        if any([type(value) is np.str_ for value in label_values]):
+            label_prepro[idx] = OrdinalEncoder()
+            label_prepro[idx].fit(all_label_data[idx][:, np.newaxis])
+            out_to_real_pred_func[idx] = lambda x : label_prepro[idx].inverse_transform(
+                x.argmax(1).cpu().detach().unsqueeze(1).numpy()).squeeze()
+        if output_dim > n_bins:
+            label_prepro[idx] = KBinsDiscretizer(n_bins=n_bins, encode="ordinal")
+            label_prepro[idx].fit(all_label_data[idx][:, np.newaxis])
+            print(label_prepro[idx].bin_edges_)
+            output_dim = n_bins
     criterion = nn.CrossEntropyLoss()
     evaluation_against_real_metric = {}
     out_to_pred_func = lambda x: x.argmax(1).cpu().detach().numpy()
 
 n_features = len(metrics)
 
-
 activation = "ReLU"
-all_metrics = {}
-for name in evaluation_metrics.keys():
-    all_metrics[name] = [[] for _ in range(args.epochs)]
-for name in evaluation_against_real_metric.keys():
-    all_metrics[name] = [[] for _ in range(args.epochs)]
-
 use_board = True
 show_pbar = True
 
@@ -475,202 +560,225 @@ class ConcatAlongDim(nn.Module):
     #         dataset["test"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
     #         shuffle=True)
 
-encoder = SphericalHemiFusionEncoder(
-    n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
-    conv_flts=args.conv_filters, activation=activation,
-    batch_norm=args.batch_norm, conv_mode=args.conv,
-    cachedir=os.path.join(args.outdir, "cached_ico_infos"))
 
-if checkpoint is not None:
-    encoder.load_state_dict(checkpoint)
+all_metrics = {}
+for name in evaluation_metrics.keys():
+    all_metrics[name] = [[] for _ in range(args.epochs)]
+for name in evaluation_against_real_metric.keys():
+    all_metrics[name] = [[] for _ in range(args.epochs)]
+        
+for fold, (train_loader, test_loader) in enumerate(
+    zip(train_loaders, valid_loaders + [test_loader])):
 
-all_encoder_params = list(encoder.parameters())
-assert np.abs(args.freeze_up_to) < len(all_encoder_params)
-idx_to_freeze = []
-if args.freeze_up_to != 0:
-    number_of_layers_per_layer = 2 if not args.batch_norm else 3
-    if args.freeze_up_to < 0:
-        args.freeze_up_to = len(all_encoder_params) - args.freeze_up_to
-    for idx in range(len(all_encoder_params)):
-        fused = idx >= args.fusion_level * 2 * number_of_layers_per_layer
-        idx_after_fusion = idx - args.fusion_level * 2 * number_of_layers_per_layer
-        if not fused and idx % (args.fusion_level * number_of_layers_per_layer) < (args.freeze_up_to) * number_of_layers_per_layer:
-            idx_to_freeze.append(idx)
-        elif fused and idx_after_fusion < (args.freeze_up_to - args.fusion_level) * number_of_layers_per_layer:
-            idx_to_freeze.append(idx)
-    
-for idx, param in enumerate(all_encoder_params):
-    if idx in idx_to_freeze:
-        param.requires_grad = False
+    encoder = SphericalHemiFusionEncoder(
+        n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
+        conv_flts=args.conv_filters, activation=activation,
+        batch_norm=args.batch_norm, conv_mode=args.conv,
+        cachedir=os.path.join(args.outdir, "cached_ico_infos"))
 
-predictor = nn.Sequential(*[
-    # nn.Linear(args.latent_dim, hidden_dim),
-    # nn.LeakyReLU(),
-    # nn.Linear(hidden_dim, hidden_dim),
-    # nn.LeakyReLU(),
-    # nn.Linear(hidden_dim, hidden_dim),
-    # nn.LeakyReLU(),
-    nn.Dropout(args.dropout_rate),
-    nn.Linear(args.latent_dim, output_dim),
-    output_activation
-])
+    if checkpoint is not None:
+        encoder.load_state_dict(checkpoint)
 
-model = nn.Sequential(encoder, predictor)
+    all_encoder_params = list(encoder.parameters())
+    assert np.abs(args.freeze_up_to) < len(all_encoder_params)
+    idx_to_freeze = []
+    if args.freeze_up_to != 0:
+        number_of_layers_per_layer = 2 if not args.batch_norm else 3
+        if args.freeze_up_to < 0:
+            args.freeze_up_to = len(all_encoder_params) - args.freeze_up_to
+        for idx in range(len(all_encoder_params)):
+            fused = idx >= args.fusion_level * 2 * number_of_layers_per_layer
+            idx_after_fusion = idx - args.fusion_level * 2 * number_of_layers_per_layer
+            if not fused and idx % (args.fusion_level * number_of_layers_per_layer) < (args.freeze_up_to) * number_of_layers_per_layer:
+                idx_to_freeze.append(idx)
+            elif fused and idx_after_fusion < (args.freeze_up_to - args.fusion_level) * number_of_layers_per_layer:
+                idx_to_freeze.append(idx)
+        
+    for idx, param in enumerate(all_encoder_params):
+        if idx in idx_to_freeze:
+            param.requires_grad = False
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = model.to(device)
+    predictor = nn.Sequential(*[
+        # nn.Linear(args.latent_dim, hidden_dim),
+        # nn.LeakyReLU(),
+        # nn.Linear(hidden_dim, hidden_dim),
+        # nn.LeakyReLU(),
+        # nn.Linear(hidden_dim, hidden_dim),
+        # nn.LeakyReLU(),
+        nn.Dropout(args.dropout_rate),
+        nn.Linear(args.latent_dim, output_dim),
+        output_activation
+    ])
 
-    # print(model)
-print("Number of trainable parameters : ",
-    sum(p.numel() for p in model.parameters() if p.requires_grad))
+    model = nn.Sequential(encoder, predictor)
 
-optimizer = optim.Adam(model.parameters(), args.learning_rate,
-                    weight_decay=args.weight_decay)
-if args.momentum > 0:
-    optimizer = optim.SGD(model.parameters(), args.learning_rate,
-        momentum=args.momentum, weight_decay=args.weight_decay)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = model.to(device)
 
-if args.reduce_lr:
-    # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.8)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, len(loader) * args.epochs)
-# if args.momentum > 0:
-#     optimizer = optim.SGD(model.parameters(), lr=args.learning_rate,
-#                         weight_decay=args.weight_decay, momentum=args.momentum)
-# scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.3)
-# scheduler = optim.lr_scheduler.MultiplicativeLR(optimizer, lambda epoch: 0.97 if epoch % 5 == 0 else 1)
+    checkpoint_path = os.path.join(
+        checkpoint_dir, f"fold_{fold}", "model_epoch_{}.pth")
 
-if args.epochs > 0 and use_board:
-    board = Board(env=str(run_id))
+        # print(model)
+    print("Number of trainable parameters : ",
+        sum(p.numel() for p in model.parameters() if p.requires_grad))
 
-start_epoch = 0
-start_time = time.time()
-scaler = torch.cuda.amp.GradScaler()
-for epoch in range(start_epoch, args.epochs):
-    stats = dict(epoch=epoch, lr=optimizer.param_groups[0]["lr"],
-                loss=0, validation_loss=0, validation_mse=0,
-                total_train_val_time=0, average_train_epoch_duration=0,
-                train_epoch_duration=0, average_valid_epoch_duration=0,
-                valid_epoch_duration=0)
-    for name in evaluation_metrics.keys():
-        stats[name] = 0
-        stats["validation_" + name] = 0
-    for name in evaluation_against_real_metric.keys():
-        stats[name] = 0
-        stats["validation_" + name] = 0
+    optimizer = optim.Adam(model.parameters(), args.learning_rate,
+                        weight_decay=args.weight_decay)
+    if args.momentum > 0:
+        optimizer = optim.SGD(model.parameters(), args.learning_rate,
+            momentum=args.momentum, weight_decay=args.weight_decay)
 
-    # Training
-    model.train()
-    with tqdm(total=len(loader), desc="Training epoch : {} / {}".format(epoch, args.epochs),
-            postfix={"loss": 0, "lr": stats["lr"], "average time": 0}, disable=not show_pbar) as pbar:
-        for step, x in enumerate(loader):
-            # pbar.update(step + 1)
-            x, metadata, _ = x
-            start_batch_time = time.time()
-            left_x = x["surface-lh"].float().to(device, non_blocking=True)
-            right_x = x["surface-rh"].float().to(device, non_blocking=True)
-            if args.to_predict in metadata.keys():
-                y = metadata[args.to_predict]
-            else:
-                y = x["clinical"][:, index_to_predict]
-            new_y = label_prepro.transform(np.array(y)[:, np.newaxis])
-            new_y = getattr(torch.tensor(new_y), tensor_type)().squeeze()
-            new_y = new_y.to(device, non_blocking=True)
-            if args.to_predict == "asd":
-                new_y -= 1
-            optimizer.zero_grad()
-            with torch.cuda.amp.autocast():
-                X = (left_x, right_x)
-                y_hat = model(X).squeeze()
-                loss = criterion(y_hat, new_y)
-                preds = out_to_pred_func(y_hat)
-                real_preds = out_to_real_pred_func(y_hat)
+    if args.reduce_lr:
+        # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.8)
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, len(loader) * args.epochs)
+        # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.3)
+        # scheduler = optim.lr_scheduler.MultiplicativeLR(optimizer, lambda epoch: 0.97 if epoch % 5 == 0 else 1)
 
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            epoch_duration = time.time() - start_batch_time
-            stats.update({
-                "loss": (stats["loss"] * step + loss.item()) / (step + 1),
-                "total_train_val_time": time.time() - start_time,
-                "average_train_epoch_duration": (stats["average_train_epoch_duration"] * step + 
-                    epoch_duration) / (step + 1),
-                "train_epoch_duration": epoch_duration,
-            })
-            for name, metric in evaluation_metrics.items():
-                stats[name] = (stats[name] * step + metric(new_y.cpu().detach(), preds)) / (step + 1)
-            for name, metric in evaluation_against_real_metric.items():
-                stats[name] = (stats[name] * step + metric(y.detach(), real_preds)) / (step + 1)
-            pbar.set_postfix({
-                "loss": stats["loss"], "lr": stats["lr"],
-                "average_time": stats["average_train_epoch_duration"]})
-            pbar.update(1)
-        if use_board:
-            board.update_plot("training loss", epoch, stats["loss"])
-            for name in evaluation_metrics.keys():
-                board.update_plot(name, epoch, stats[name])
-            for name in evaluation_against_real_metric.keys():
-                board.update_plot(name, epoch, stats[name])
+    if args.epochs > 0 and use_board:
+        board = Board(env=str(run_id))
 
-    # Validation
-    model.eval()
-    with tqdm(total=len(valid_loader), desc="Validation epoch : {} / {}".format(epoch, args.epochs),
-            postfix={"loss": 0, "average time": 0}, disable=not show_pbar) as pbar:
-        for step, x in enumerate(valid_loader):
-            x, metadata, _ = x
-            start_batch_time = time.time()
-            left_x = x["surface-lh"].float().to(device, non_blocking=True)
-            right_x = x["surface-rh"].float().to(device, non_blocking=True)
-            if args.to_predict in metadata.keys():
-                y = metadata[args.to_predict]
-            else:
-                y = x["clinical"][:, index_to_predict]
-            new_y = label_prepro.transform(np.array(y)[:, np.newaxis])
-            new_y = getattr(torch.tensor(new_y), tensor_type)().squeeze()
-            new_y = new_y.to(device, non_blocking=True)
-            if args.to_predict == "asd":
-                new_y -= 1
-            with torch.no_grad():
+    start_epoch = 0
+    start_time = time.time()
+    scaler = torch.cuda.amp.GradScaler()
+    for epoch in range(start_epoch, args.epochs):
+        stats = dict(epoch=epoch, lr=optimizer.param_groups[0]["lr"],
+                    loss=0, validation_loss=0, validation_mse=0,
+                    total_train_val_time=0, average_train_epoch_duration=0,
+                    train_epoch_duration=0, average_valid_epoch_duration=0,
+                    valid_epoch_duration=0)
+        for name in evaluation_metrics.keys():
+            stats[name] = 0
+            stats["validation_" + name] = 0
+        for name in evaluation_against_real_metric.keys():
+            stats[name] = 0
+            stats["validation_" + name] = 0
+
+        # Training
+        model.train()
+        with tqdm(total=len(train_loader), desc="Training epoch : {} / {}".format(epoch, args.epochs),
+                postfix={"loss": 0, "lr": stats["lr"], "average time": 0}, disable=not show_pbar) as pbar:
+            for step, x in enumerate(train_loader):
+                # pbar.update(step + 1)
+                x, metadata, _ = x
+                start_batch_time = time.time()
+                left_x = x["surface-lh"].float().to(device, non_blocking=True)
+                right_x = x["surface-rh"].float().to(device, non_blocking=True)
+                if args.to_predict in metadata.keys():
+                    y = metadata[args.to_predict]
+                else:
+                    y = x["clinical"][:, index_to_predict]
+                new_y = label_prepro[idx].transform(np.array(y)[:, np.newaxis])
+                new_y = getattr(torch.tensor(new_y), tensor_type)().squeeze()
+                new_y = new_y.to(device, non_blocking=True)
+                if args.to_predict == "asd":
+                    new_y -= 1
+                optimizer.zero_grad()
                 with torch.cuda.amp.autocast():
                     X = (left_x, right_x)
                     y_hat = model(X).squeeze()
                     loss = criterion(y_hat, new_y)
                     preds = out_to_pred_func(y_hat)
-                    real_preds = out_to_real_pred_func(y_hat)
+                    real_preds = out_to_real_pred_func[idx](y_hat)
 
-            epoch_duration = time.time() - start_batch_time
-            stats.update({
-                "validation_loss": (stats["validation_loss"] * step + loss.item()) / (step + 1),
-                "total_train_val_time": time.time() - start_time,
-                "average_valid_epoch_duration": (stats["average_valid_epoch_duration"] * step + 
-                    epoch_duration) / (step + 1),
-                "valid_epoch_duration": epoch_duration,
-            })
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+                epoch_duration = time.time() - start_batch_time
+                stats.update({
+                    "loss": (stats["loss"] * step + loss.item()) / (step + 1),
+                    "total_train_val_time": time.time() - start_time,
+                    "average_train_epoch_duration": (stats["average_train_epoch_duration"] * step + 
+                        epoch_duration) / (step + 1),
+                    "train_epoch_duration": epoch_duration,
+                })
+                for name, metric in evaluation_metrics.items():
+                    stats[name] = (stats[name] * step + metric(new_y.cpu().detach(), preds)) / (step + 1)
+                for name, metric in evaluation_against_real_metric.items():
+                    stats[name] = (stats[name] * step + metric(y.detach(), real_preds)) / (step + 1)
+                pbar.set_postfix({
+                    "loss": stats["loss"], "lr": stats["lr"],
+                    "average_time": stats["average_train_epoch_duration"]})
+                pbar.update(1)
+            if use_board:
+                board.update_plot("training loss", epoch, stats["loss"])
+                for name in evaluation_metrics.keys():
+                    board.update_plot(name, epoch, stats[name])
+                for name in evaluation_against_real_metric.keys():
+                    board.update_plot(name, epoch, stats[name])
+
+        # Validation
+        model.eval()
+        with tqdm(total=len(test_loader), desc="Validation epoch : {} / {}".format(epoch, args.epochs),
+                postfix={"loss": 0, "average time": 0}, disable=not show_pbar) as pbar:
+            for step, x in enumerate(test_loader):
+                x, metadata, _ = x
+                start_batch_time = time.time()
+                left_x = x["surface-lh"].float().to(device, non_blocking=True)
+                right_x = x["surface-rh"].float().to(device, non_blocking=True)
+                if args.to_predict in metadata.keys():
+                    y = metadata[args.to_predict]
+                else:
+                    y = x["clinical"][:, index_to_predict]
+                new_y = label_prepro[idx].transform(np.array(y)[:, np.newaxis])
+                new_y = getattr(torch.tensor(new_y), tensor_type)().squeeze()
+                new_y = new_y.to(device, non_blocking=True)
+                if args.to_predict == "asd":
+                    new_y -= 1
+                with torch.no_grad():
+                    with torch.cuda.amp.autocast():
+                        X = (left_x, right_x)
+                        y_hat = model(X).squeeze()
+                        loss = criterion(y_hat, new_y)
+                        preds = out_to_pred_func(y_hat)
+                        real_preds = out_to_real_pred_func[idx](y_hat)
+
+                epoch_duration = time.time() - start_batch_time
+                stats.update({
+                    "validation_loss": (stats["validation_loss"] * step + loss.item()) / (step + 1),
+                    "total_train_val_time": time.time() - start_time,
+                    "average_valid_epoch_duration": (stats["average_valid_epoch_duration"] * step + 
+                        epoch_duration) / (step + 1),
+                    "valid_epoch_duration": epoch_duration,
+                })
+                for name, metric in evaluation_metrics.items():
+                    stats["validation_" + name] = (stats["validation_" + name] * step + metric(new_y.cpu().detach(), preds)) / (step + 1)
+                for name, metric in evaluation_against_real_metric.items():
+                    stats["validation_" + name] = (stats["validation_" + name] * step + metric(y.detach(), real_preds)) / (step + 1)
+                pbar.set_postfix({
+                        "loss": stats["validation_loss"],
+                        "average_time": stats["average_valid_epoch_duration"]})
+                pbar.update(1)
+        if args.reduce_lr:
+            scheduler.step()
+
+        if use_board:
+            board.update_plot("validation loss", epoch, stats["validation_loss"])
+        for name in evaluation_metrics.keys():
+            all_metrics[name][epoch].append(stats["validation_" + name])
+            if use_board:
+                board.update_plot("validation " + name, epoch, stats["validation_" + name])
+        for name in evaluation_against_real_metric.keys():
+            all_metrics[name][epoch].append(stats["validation_" + name])
+            if use_board:
+                board.update_plot("validation " + name, epoch, stats["validation_" + name])
+        if epoch % args.save_freq == 0:
+            dict_to_save = {
+                "epoch": epoch,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "loss": stats["loss"],
+                "valid_loss": stats["validation_loss"]}
             for name, metric in evaluation_metrics.items():
-                stats["validation_" + name] = (stats["validation_" + name] * step + metric(new_y.cpu().detach(), preds)) / (step + 1)
+                dict_to_save[name] = stats[name]
+                dict_to_save["validation_" + name] = stats["validation_" + name]
             for name, metric in evaluation_against_real_metric.items():
-                stats["validation_" + name] = (stats["validation_" + name] * step + metric(y.detach(), real_preds)) / (step + 1)
-            pbar.set_postfix({
-                    "loss": stats["validation_loss"],
-                    "average_time": stats["average_valid_epoch_duration"]})
-            pbar.update(1)
-    if args.reduce_lr:
-        scheduler.step()
-
-    if use_board:
-        board.update_plot("validation loss", epoch, stats["validation_loss"])
-    for name in evaluation_metrics.keys():
-        all_metrics[name][epoch].append(stats["validation_" + name])
-        if use_board:
-            board.update_plot("validation " + name, epoch, stats["validation_" + name])
-    for name in evaluation_against_real_metric.keys():
-        all_metrics[name][epoch].append(stats["validation_" + name])
-        if use_board:
-            board.update_plot("validation " + name, epoch, stats["validation_" + name])
+                dict_to_save[name] = stats[name]
+                dict_to_save["validation_" + name] = stats["validation_" + name]
+            torch.save(dict_to_save, checkpoint_path.format(epoch))
 
     print(json.dumps(stats), file=stats_file)
-    if args.evaluate and epoch == args.epochs - 1:
-        print(stats)
-        torch.save(model.state_dict(), os.path.join(checkpoint_dir, "model.pth"))
+    print(stats)
+    torch.save(model.state_dict(), os.path.join(checkpoint_dir, "model.pth"))
         # scheduler.step()
     #     state = dict(epoch=epoch + 1,
     #                 model=model.state_dict(),
@@ -682,61 +790,52 @@ for epoch in range(start_epoch, args.epochs):
 average_metrics = {}
 std_metrics = {}
 for metric in all_metrics.keys():
-    average_metrics[metric] = np.mean(all_metrics[metric], axis=1)
-    std_metrics[metric] = np.std(all_metrics[metric], axis=1)
+    average_metrics[metric] = np.mean(np.asarray(all_metrics[metric])[:, :-1], axis=1)
+    std_metrics[metric] = np.std(np.asarray(all_metrics[metric])[:, :-1], axis=1)
 
-if not args.evaluate:
-    # groups = {"closeness": ["real_mae", "real_rmse"], "coherence": ["r2", "correlation"]}
-    # limit_per_group = {"closeness": (0, 10), "coherence": (0, 1)}
-    # for name, group in groups.items():
-    #     plt.figure()
-    #     for metric in group:
-    #         values = average_metrics[metric]
-    #         plt.plot(range(args.epochs), values, label=metric)
-    #     plt.title("Average validation metrics")
-    #     plt.ylim(limit_per_group[name])
-    #     plt.xlabel("epoch")
-    #     plt.legend()
-    #     plt.savefig(os.path.join(
-    #         checkpoint_dir,"validation_metrics_{}.png".format(name)))
 
-    best_epochs_per_metric = {}
-    best_values_per_metric = {}
-    best_stds_per_metric = {}
-    the_lower_the_better = ["real_mae", "real_rmse"]
-    for metric in all_metrics.keys():#["real_mae", "real_rmse", "r2", "correlation"]:
-        sorted_epochs = np.argsort(average_metrics[metric])
-        sorted_values = np.sort(average_metrics[metric])
-        if metric in the_lower_the_better:
-            best_epochs = sorted_epochs[:5]
-            best_values = sorted_values[:5]
-        else:
-            best_epochs = sorted_epochs[::-1][:5]
-            best_values = sorted_values[::-1][:5]
-        best_epochs_per_metric[metric] = best_epochs.tolist()
-        best_values_per_metric[metric] = best_values.tolist()
-        best_stds_per_metric[metric] = std_metrics[metric][best_epochs].tolist()
+best_epochs_per_metric = {}
+best_values_per_metric = {}
+best_stds_per_metric = {}
+the_lower_the_better = ["real_mae", "real_rmse"]
+for metric in all_metrics.keys():#["real_mae", "real_rmse", "r2", "correlation"]:
+    sorted_epochs = np.argsort(average_metrics[metric])
+    sorted_values = np.sort(average_metrics[metric])
+    if metric in the_lower_the_better:
+        best_epochs = sorted_epochs[:5]
+        best_values = sorted_values[:5]
+    else:
+        best_epochs = sorted_epochs[::-1][:5]
+        best_values = sorted_values[::-1][:5]
+    best_epochs_per_metric[metric] = best_epochs.tolist()
+    best_values_per_metric[metric] = best_values.tolist()
+    best_stds_per_metric[metric] = std_metrics[metric][best_epochs].tolist()
 
-    with open(os.path.join(checkpoint_dir, 'best_values.json'), 'w') as fp:
-        json.dump(best_values_per_metric, fp)
+with open(os.path.join(checkpoint_dir, 'best_values.json'), 'w') as fp:
+    json.dump(best_values_per_metric, fp)
 
-    with open(os.path.join(checkpoint_dir, 'best_epochs.json'), 'w') as fp:
-        json.dump(best_epochs_per_metric, fp)
+with open(os.path.join(checkpoint_dir, 'best_epochs.json'), 'w') as fp:
+    json.dump(best_epochs_per_metric, fp)
 
-    with open(os.path.join(checkpoint_dir, 'best_stds.json'), 'w') as fp:
-        json.dump(best_stds_per_metric, fp)
-else:
-    final_value_per_metric = {}
-    final_std_per_metric = {}
-    for metric in ["real_mae", "real_rmse", "r2", "correlation"]:
-        final_value_per_metric[metric] = average_metrics[metric][-1]
-        final_std_per_metric[metric] = std_metrics[metric][-1]
+with open(os.path.join(checkpoint_dir, 'best_stds.json'), 'w') as fp:
+    json.dump(best_stds_per_metric, fp)
 
-    with open(os.path.join(checkpoint_dir, 'final_values.json'), 'w') as fp:
-        json.dump(final_value_per_metric, fp)
-    
-    with open(os.path.join(checkpoint_dir, 'final_stds.json'), 'w') as fp:
-        json.dump(final_std_per_metric, fp)
+final_value_per_metric = {}
+final_valid_value_per_metric = {}
+final_valid_std_per_metric = {}
+for metric in all_metrics.keys():
+    final_value_per_metric[metric] = all_metrics[metric][best_epochs_per_metric[metric][0], -1]
+    final_valid_value_per_metric[metric] = average_metrics[metric][best_epochs_per_metric[metric][0]]
+    final_valid_std_per_metric[metric] = std_metrics[metric][best_epochs_per_metric[metric][0]]
+
+with open(os.path.join(checkpoint_dir, 'final_values.json'), 'w') as fp:
+    json.dump(final_value_per_metric, fp)
+
+with open(os.path.join(checkpoint_dir, 'final_valid_stds.json'), 'w') as fp:
+    json.dump(final_valid_std_per_metric, fp)
+
+with open(os.path.join(checkpoint_dir, 'final_valid_values.json'), 'w') as fp:
+    json.dump(final_valid_value_per_metric, fp)
 
 # checkpoint = torch.load(checkpoint_file)
 # model.load_state_dict(checkpoint["model"])

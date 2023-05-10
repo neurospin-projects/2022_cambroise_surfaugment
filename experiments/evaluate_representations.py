@@ -197,9 +197,12 @@ else:
                 if case not in best_cp_per_case.keys():
                     best_cp_per_case[case] = (
                         setup_ids, checkpoints, best_value, best_param)
-                if ((best_cp_per_case[case][2] > best_value and best_is_low)
+                if ((best_cp_per_case[case][2] > best_value and best_is_low
+                     and len(best_cp_per_case[case][0]) <= len(setup_ids))
                     or (best_cp_per_case[case][2] < best_value and
-                        not best_is_low) or len(best_cp_per_case[case][0]) < len(setup_ids)):
+                        not best_is_low and
+                        len(best_cp_per_case[case][0]) <= len(setup_ids))
+                        or len(best_cp_per_case[case][0]) < len(setup_ids)):
                     best_cp_per_case[case] = (
                         setup_ids, checkpoints, best_value, best_param)
             else:
@@ -387,7 +390,7 @@ else:
     evaluation_metrics = {"accuracy": accuracy_score,
                           "bacc": balanced_accuracy_score}
     tensor_type = "long"
-    n_bins = 3
+    n_bins = 100
     label_prepro = TransparentProcessor()
     # out_to_real_pred_func = lambda x : x.argmax(1).cpu().detach().numpy()
     if any([type(value) is np.str_ for value in label_values]):
@@ -447,7 +450,7 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
                     torch.squeeze,
                     Reshape(input_shape),
                 ])
-        elif validation is not None:
+        elif scaling:
             scalers = dict(train=[])
             
             for fold in range(validation):
@@ -572,6 +575,9 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
                 valid_loaders.append(torch.utils.data.DataLoader(
                     dataset["train"][fold]["valid"], batch_size=batch_size,
                     num_workers=6, pin_memory=True, shuffle=True))
+            train_loaders.append(torch.utils.data.DataLoader(
+                dataset["train"]["all"], batch_size=batch_size, num_workers=6,
+                pin_memory=True, shuffle=True))
         test_dataset = dataset["test"]
         if local_args.data_train == args.data:
             test_dataset = test_dataset["test"]
