@@ -380,7 +380,7 @@ for idx, loader in enumerate(train_loaders):
             index_to_predict = clinical_names.tolist().index(args.to_predict)
             all_label_data[idx].append(data["clinical"][:, index_to_predict])
     all_label_data[idx] = np.concatenate(all_label_data[idx])
-label_values = np.unique(all_label_data)
+label_values = np.unique(np.concatenate(all_label_data))
 
 def corr_metric(y_true, y_pred):
     mat = np.concatenate([y_true[:, np.newaxis], y_pred[:, np.newaxis]], axis=1)
