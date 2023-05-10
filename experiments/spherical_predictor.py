@@ -828,7 +828,7 @@ final_value_per_metric = {}
 final_valid_value_per_metric = {}
 final_valid_std_per_metric = {}
 for metric in all_metrics.keys():
-    final_value_per_metric[metric] = all_metrics[metric][best_epochs_per_metric[metric][0], -1]
+    final_value_per_metric[metric] = all_metrics[metric][best_epochs_per_metric[metric][0]][-1]
     final_valid_value_per_metric[metric] = average_metrics[metric][best_epochs_per_metric[metric][0]]
     final_valid_std_per_metric[metric] = std_metrics[metric][best_epochs_per_metric[metric][0]]
 
