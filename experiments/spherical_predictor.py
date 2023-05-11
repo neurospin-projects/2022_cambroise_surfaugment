@@ -164,6 +164,7 @@ if args.pretrained_setup != "None":
     assert args.setups_file != "None"
     setups = pd.read_table(args.setups_file)
     params, epoch = setups[setups["id"] == int(args.pretrained_setup)][["args", "best_epoch"]].values[0]
+    epochs, lr, reduce_lr = args.epochs, args.learning_rate, args.reduce_lr
     args = params_from_args(params, args)
     if args.pretrained_epoch is not None:
         epoch = args.pretrained_epoch
@@ -177,8 +178,7 @@ if args.pretrained_setup != "None":
         pretrained_path = params
         pretrained_path = pretrained_path.replace(
             "encoder.pth", "model_epoch_{}.pth".format(int(epoch)))
-    epochs, lr, reduce_lr = args.epochs, args.learning_rate, args.reduce_lr
-    
+
     args.epochs, args.learning_rate, args.reduce_lr = epochs, lr, reduce_lr
     checkpoint = torch.load(pretrained_path)
     checkpoint = encoder_cp_from_barlow_cp(checkpoint)
@@ -781,7 +781,7 @@ for fold, (train_loader, test_loader) in enumerate(
             torch.save(dict_to_save, checkpoint_path.format(epoch))
 
     print(json.dumps(stats), file=stats_file)
-    print(stats)
+    # print(stats)
     torch.save(model.state_dict(), os.path.join(checkpoint_dir, "model.pth"))
         # scheduler.step()
     #     state = dict(epoch=epoch + 1,
