@@ -52,7 +52,7 @@ parser.add_argument(
     "--batch-norm", "-bn", action="store_true",
     help="optionnally uses batch normalization.")
 parser.add_argument(
-    "--latent-dim", default=64, type=int, metavar="N",
+    "--latent-dim", default=128, type=int, metavar="N",
     help="the number of latent dimension.")
 parser.add_argument(
     "--outdir", metavar="DIR", help="output directory path.", required=True)
