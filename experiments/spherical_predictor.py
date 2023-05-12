@@ -633,10 +633,11 @@ for fold, (train_loader, test_loader) in enumerate(
     if args.reduce_lr:
         # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.8)
         # scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, len(loader) * args.epochs)
+        # scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[10], gamma=0.1)
         scheduler = optim.lr_scheduler.StepLR(
             optimizer,
-            step_size=int(
-                np.ceil(len(loader) / args.batch_size) * args.epochs * 0.3),
+            step_size=10,#int(
+                #np.ceil(len(loader) / args.batch_size) * args.epochs * 0.3),
             gamma=0.1)
         # scheduler = optim.lr_scheduler.MultiplicativeLR(optimizer, lambda epoch: 0.97 if epoch % 5 == 0 else 1)
 
