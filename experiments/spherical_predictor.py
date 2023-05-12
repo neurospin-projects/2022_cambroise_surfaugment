@@ -566,10 +566,9 @@ for name in evaluation_metrics.keys():
     all_metrics[name] = [[] for _ in range(args.epochs)]
 for name in evaluation_against_real_metric.keys():
     all_metrics[name] = [[] for _ in range(args.epochs)]
-        
+
 for fold, (train_loader, test_loader) in enumerate(
     zip(train_loaders, valid_loaders + [test_loader])):
-
     encoder = SphericalHemiFusionEncoder(
         n_features, args.ico_order, args.latent_dim, fusion_level=args.fusion_level,
         conv_flts=args.conv_filters, activation=activation,
@@ -633,8 +632,12 @@ for fold, (train_loader, test_loader) in enumerate(
 
     if args.reduce_lr:
         # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.8)
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, len(loader) * args.epochs)
-        # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.3)
+        # scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, len(loader) * args.epochs)
+        scheduler = optim.lr_scheduler.StepLR(
+            optimizer,
+            step_size=int(
+                np.ceil(len(loader) / args.batch_size) * args.epochs * 0.3),
+            gamma=0.1)
         # scheduler = optim.lr_scheduler.MultiplicativeLR(optimizer, lambda epoch: 0.97 if epoch % 5 == 0 else 1)
 
     if args.epochs > 0 and use_board:
@@ -832,13 +835,14 @@ for metric in all_metrics.keys():
     final_valid_value_per_metric[metric] = average_metrics[metric][best_epochs_per_metric[metric][0]]
     final_valid_std_per_metric[metric] = std_metrics[metric][best_epochs_per_metric[metric][0]]
 
-with open(os.path.join(checkpoint_dir, 'final_values.json'), 'w') as fp:
+print(final_value_per_metric)
+with open(os.path.join(checkpoint_dir, "..", 'final_values.json'), 'w') as fp:
     json.dump(final_value_per_metric, fp)
 
-with open(os.path.join(checkpoint_dir, 'final_valid_stds.json'), 'w') as fp:
+with open(os.path.join(checkpoint_dir, "..", 'final_valid_stds.json'), 'w') as fp:
     json.dump(final_valid_std_per_metric, fp)
 
-with open(os.path.join(checkpoint_dir, 'final_valid_values.json'), 'w') as fp:
+with open(os.path.join(checkpoint_dir, "..", 'final_valid_values.json'), 'w') as fp:
     json.dump(final_valid_value_per_metric, fp)
 
 # checkpoint = torch.load(checkpoint_file)
