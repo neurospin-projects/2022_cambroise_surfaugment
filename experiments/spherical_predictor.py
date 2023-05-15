@@ -442,7 +442,7 @@ n_features = len(metrics)
 
 def mixup_data(left_x, right_x, y, l):
     """Returns mixed inputs, pairs of targets, and lambda"""
-    indices = torch.randperm(x.shape[0]).to(x.device)
+    indices = torch.randperm(left_x.shape[0]).to(left_x.device)
 
     mixed_left_x = l * left_x + (1 - l) * left_x[indices]
     mixed_right_x = l * right_x + (1 - l) * right_x[indices]
