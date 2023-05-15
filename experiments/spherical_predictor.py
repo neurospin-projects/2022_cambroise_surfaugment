@@ -430,6 +430,7 @@ else:
         if any([type(value) is np.str_ for value in label_values]):
             label_prepro[idx] = OrdinalEncoder()
             label_prepro[idx].fit(all_label_data[idx][:, np.newaxis])
+            print(label_prepro[idx].categories_)
             out_to_real_pred_func[idx] = lambda x : label_prepro[idx].inverse_transform(
                 x.argmax(1).cpu().detach().unsqueeze(1).numpy()).squeeze()
         if output_dim > n_bins:
@@ -710,12 +711,14 @@ for fold, (train_loader, test_loader) in enumerate(
                 with torch.cuda.amp.autocast():
                     X = (left_x, right_x)
                     y_hat = model(X).squeeze()
+                    print(y_hat.shape)
+                    print(new_y.shape)
+                    print(new_y)
+                    print(y_hat)
                     if args.mixup > 0:
                         loss = mixup_criterion(criterion, y_hat, y_a, y_b, mixup_lambda)
                     else:
                         loss = criterion(y_hat, new_y)
-                    print(y_hat.shape)
-                    print(y_hat)
                     preds = out_to_pred_func(y_hat)
                     real_preds = out_to_real_pred_func[fold](y_hat)
 
