@@ -764,6 +764,9 @@ for fold, (train_loader, test_loader) in enumerate(
                 new_y = new_y.to(device, non_blocking=True)
                 if args.to_predict == "asd":
                     new_y -= 1
+                if args.to_predict == "sex":
+                    new_y[new_y == -1] = 0
+
                 with torch.no_grad():
                     with torch.cuda.amp.autocast():
                         X = (left_x, right_x)
