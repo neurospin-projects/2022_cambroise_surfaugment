@@ -82,6 +82,9 @@ parser.add_argument(
     "--dropout-rate", "-dr", default=0, type=float,
     help="the dropout rate applied before predictor.")
 parser.add_argument(
+    "--n-layers-predictor", "-nlp", default=1, type=int,
+    help="the number of layers in the predictor.")
+parser.add_argument(
     "--pretrained-setup", default="None",
     help="the path to the pretrained encoder.")
 parser.add_argument(
@@ -391,7 +394,7 @@ def corr_metric(y_true, y_pred):
     return corr_mat[0, 1]
 
 output_activation = nn.Identity()
-hidden_dim = 128
+hidden_dim = 256
 tensor_type = "float"
 out_to_pred_func = lambda x: x.cpu().detach().numpy()
 out_to_real_pred_func = []
@@ -613,17 +616,21 @@ for fold, (train_loader, test_loader) in enumerate(
         if idx in idx_to_freeze:
             param.requires_grad = False
 
-    predictor = nn.Sequential(*[
-        # nn.Linear(args.latent_dim, hidden_dim),
-        # nn.LeakyReLU(),
-        # nn.Linear(hidden_dim, hidden_dim),
-        # nn.LeakyReLU(),
-        # nn.Linear(hidden_dim, hidden_dim),
-        # nn.LeakyReLU(),
-        nn.Dropout(args.dropout_rate),
-        nn.Linear(args.latent_dim, output_dim),
-        output_activation
-    ])
+    predictor_layers = []
+    last_dim = args.latent_dim
+    next_dim = hidden_dim
+    act = getattr(nn, activation)()
+    for i in range(args.n_layers_predictor):
+        if i == args.n_layers_predictor - 1:
+            next_dim = output_dim
+            act = output_activation
+        predictor_layers += [
+            nn.Dropout(args.dropout_rate),
+            nn.Linear(last_dim, next_dim),
+            act]
+        last_dim = next_dim
+
+    predictor = nn.Sequential(*predictor_layers)
 
     model = nn.Sequential(encoder, predictor)
 
@@ -707,6 +714,8 @@ for fold, (train_loader, test_loader) in enumerate(
                         loss = mixup_criterion(criterion, y_hat, y_a, y_b, mixup_lambda)
                     else:
                         loss = criterion(y_hat, new_y)
+                    print(y_hat.shape)
+                    print(y_hat)
                     preds = out_to_pred_func(y_hat)
                     real_preds = out_to_real_pred_func[fold](y_hat)
 
