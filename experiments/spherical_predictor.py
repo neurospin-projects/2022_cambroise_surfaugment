@@ -636,7 +636,7 @@ for fold, (train_loader, test_loader) in enumerate(
         # scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[10], gamma=0.1)
         scheduler = optim.lr_scheduler.StepLR(
             optimizer,
-            step_size=10,#int(
+            step_size=50,#int(
                 #np.ceil(len(loader) / args.batch_size) * args.epochs * 0.3),
             gamma=0.1)
         # scheduler = optim.lr_scheduler.MultiplicativeLR(optimizer, lambda epoch: 0.97 if epoch % 5 == 0 else 1)
