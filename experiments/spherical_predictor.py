@@ -703,6 +703,9 @@ for fold, (train_loader, test_loader) in enumerate(
                 new_y = new_y.to(device, non_blocking=True)
                 if args.to_predict == "asd":
                     new_y -= 1
+                if args.to_predict == "sex":
+                    new_y += 1
+                    new_y /= 2
 
                 if args.mixup > 0:
                     mixup_lambda = np.random.beta(args.mixup, args.mixup)
@@ -711,10 +714,6 @@ for fold, (train_loader, test_loader) in enumerate(
                 with torch.cuda.amp.autocast():
                     X = (left_x, right_x)
                     y_hat = model(X).squeeze()
-                    print(y_hat.shape)
-                    print(new_y.shape)
-                    print(new_y)
-                    print(y_hat)
                     if args.mixup > 0:
                         loss = mixup_criterion(criterion, y_hat, y_a, y_b, mixup_lambda)
                     else:
