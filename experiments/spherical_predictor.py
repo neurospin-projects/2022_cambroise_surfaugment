@@ -107,6 +107,9 @@ parser.add_argument(
     "--momentum", default=0.0, type=float,
     help="optionnally uses SGD with momentum.")
 parser.add_argument(
+    "--mixup", default=0.0, type=float,
+    help="optionnally uses mixup augmentation and criterion.")
+parser.add_argument(
     "--reduce-lr", action="store_true",
     help="optionnally reduces the learning rate during training.")
 parser.add_argument(
@@ -437,6 +440,19 @@ else:
 
 n_features = len(metrics)
 
+def mixup_data(left_x, right_x, y, l):
+    """Returns mixed inputs, pairs of targets, and lambda"""
+    indices = torch.randperm(x.shape[0]).to(x.device)
+
+    mixed_left_x = l * left_x + (1 - l) * left_x[indices]
+    mixed_right_x = l * right_x + (1 - l) * right_x[indices]
+    y_a, y_b = y, y[indices]
+    return mixed_left_x, mixed_right_x, y_a, y_b
+
+
+def mixup_criterion(criterion, pred, y_a, y_b, l):
+    return l * criterion(pred, y_a) + (1 - l) * criterion(pred, y_b)
+
 activation = "ReLU"
 use_board = False
 show_pbar = True
@@ -679,11 +695,18 @@ for fold, (train_loader, test_loader) in enumerate(
                 new_y = new_y.to(device, non_blocking=True)
                 if args.to_predict == "asd":
                     new_y -= 1
+
+                if args.mixup > 0:
+                    mixup_lambda = np.random.beta(args.mixup, args.mixup)
+                    left_x, right_x, y_a, y_b = mixup_data(left_x, right_x, y, mixup_lambda)
                 optimizer.zero_grad()
                 with torch.cuda.amp.autocast():
                     X = (left_x, right_x)
                     y_hat = model(X).squeeze()
-                    loss = criterion(y_hat, new_y)
+                    if args.mixup > 0:
+                        loss = mixup_criterion(criterion, y_hat, y_a, y_b, mixup_lambda)
+                    else:
+                        loss = criterion(y_hat, new_y)
                     preds = out_to_pred_func(y_hat)
                     real_preds = out_to_real_pred_func[fold](y_hat)
 
