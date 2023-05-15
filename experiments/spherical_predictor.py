@@ -698,7 +698,7 @@ for fold, (train_loader, test_loader) in enumerate(
 
                 if args.mixup > 0:
                     mixup_lambda = np.random.beta(args.mixup, args.mixup)
-                    left_x, right_x, y_a, y_b = mixup_data(left_x, right_x, y, mixup_lambda)
+                    left_x, right_x, y_a, y_b = mixup_data(left_x, right_x, new_y, mixup_lambda)
                 optimizer.zero_grad()
                 with torch.cuda.amp.autocast():
                     X = (left_x, right_x)
