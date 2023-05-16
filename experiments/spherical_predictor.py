@@ -449,10 +449,10 @@ else:
     criterion = nn.CrossEntropyLoss()
     prop_pos = (all_label_data[-1] == 1).sum() / len(all_label_data)
     weight_pos = 1 - prop_pos
-    criterion = nn.BCEWithLogitsLoss(pos_weights=torch.FloatTensor([weight_pos]).to(device))
+    criterion = nn.BCEWithLogitsLoss(pos_weight=torch.FloatTensor([weight_pos]).to(device))
     evaluation_against_real_metric = {}
     out_to_pred_func = lambda x: x.argmax(1).cpu().detach().numpy()
-    out_to_pred_func = lambda x: x.round().cpu().detach().numpy()
+    out_to_pred_func = lambda x: nn.functional.sigmoid(x).round().cpu().detach().numpy()
 
 
 n_features = len(metrics)
