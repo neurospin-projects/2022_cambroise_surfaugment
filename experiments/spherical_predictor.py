@@ -10,6 +10,7 @@ from matplotlib import pyplot as plt
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, roc_auc_score, r2_score, mean_squared_error, mean_absolute_error
 from sklearn.preprocessing import KBinsDiscretizer, StandardScaler, RobustScaler, OrdinalEncoder
 from sklearn.neighbors import KNeighborsRegressor
+from sklearn.linear_model import LogisticRegression
 import pandas as pd
 import torch
 from torch import nn, optim
@@ -396,6 +397,7 @@ def corr_metric(y_true, y_pred):
 output_activation = nn.Identity()
 hidden_dim = 256
 tensor_type = "float"
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 out_to_pred_func = lambda x: x.cpu().detach().numpy()
 out_to_real_pred_func = []
 root_mean_squared_error = lambda x, y: mean_squared_error(x, y, squared=False)
@@ -421,12 +423,18 @@ else:
     evaluation_metrics = {"accuracy": accuracy_score, "bacc": balanced_accuracy_score,
                           "auc": roc_auc_score}
     tensor_type = "long"
+    tensor_type = "float"
     n_bins = 100
     output_activation = nn.Softmax(dim=1)
+    output_activation = nn.Sigmoid()
+    output_activation = nn.Identity()
+    output_dim = 1
     for idx in range(len(train_loaders)):
         label_prepro.append(TransparentProcessor())
+        # out_to_real_pred_func.append(
+        #     lambda x : x.argmax(1).cpu().detach().numpy())
         out_to_real_pred_func.append(
-            lambda x : x.argmax(1).cpu().detach().numpy())
+            lambda x : x.round().cpu().detach().numpy())
         if any([type(value) is np.str_ for value in label_values]):
             label_prepro[idx] = OrdinalEncoder()
             label_prepro[idx].fit(all_label_data[idx][:, np.newaxis])
@@ -439,8 +447,13 @@ else:
             print(label_prepro[idx].bin_edges_)
             output_dim = n_bins
     criterion = nn.CrossEntropyLoss()
+    prop_pos = (all_label_data[-1] == 1).sum() / len(all_label_data)
+    weight_pos = 1 - prop_pos
+    criterion = nn.BCEWithLogitsLoss(pos_weights=torch.FloatTensor([weight_pos]).to(device))
     evaluation_against_real_metric = {}
     out_to_pred_func = lambda x: x.argmax(1).cpu().detach().numpy()
+    out_to_pred_func = lambda x: x.round().cpu().detach().numpy()
+
 
 n_features = len(metrics)
 
@@ -632,10 +645,10 @@ for fold, (train_loader, test_loader) in enumerate(
         last_dim = next_dim
 
     predictor = nn.Sequential(*predictor_layers)
+    # print(predictor)
 
     model = nn.Sequential(encoder, predictor)
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
 
     checkpoint_path = os.path.join(
@@ -667,7 +680,7 @@ for fold, (train_loader, test_loader) in enumerate(
 
     if args.epochs > 0 and use_board:
         board = Board(env=str(run_id))
-
+    # linear_model = LogisticRegression()
     start_epoch = 0
     start_time = time.time()
     scaler = torch.cuda.amp.GradScaler()
@@ -710,16 +723,26 @@ for fold, (train_loader, test_loader) in enumerate(
                     mixup_lambda = np.random.beta(args.mixup, args.mixup)
                     left_x, right_x, y_a, y_b = mixup_data(left_x, right_x, new_y, mixup_lambda)
                 optimizer.zero_grad()
-                with torch.cuda.amp.autocast():
-                    X = (left_x, right_x)
-                    y_hat = model(X).squeeze()
-                    if args.mixup > 0:
-                        loss = mixup_criterion(criterion, y_hat, y_a, y_b, mixup_lambda)
-                    else:
-                        loss = criterion(y_hat, new_y)
-                    preds = out_to_pred_func(y_hat)
-                    real_preds = out_to_real_pred_func[fold](y_hat)
+                # with torch.cuda.amp.autocast():
+                X = (left_x, right_x)
+                y_hat = model(X).squeeze()
+                if args.mixup > 0:
+                    loss = mixup_criterion(criterion, y_hat, y_a, y_b, mixup_lambda)
+                else:
+                    loss = criterion(y_hat, new_y)
+                # print(y_hat.shape)
+                # print(new_y.shape)
+                # print(y_hat)
+                # print(new_y)
+                preds = out_to_pred_func(y_hat)
+                real_preds = out_to_real_pred_func[fold](y_hat)
+                    # print(preds.shape)
+                    # print(real_preds.shape)
+                    # print(preds)
+                    # print(real_preds)
 
+                # loss.backward()
+                # optimizer.step()
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
                 scaler.update()
@@ -768,12 +791,12 @@ for fold, (train_loader, test_loader) in enumerate(
                     new_y[new_y == -1] = 0
 
                 with torch.no_grad():
-                    with torch.cuda.amp.autocast():
-                        X = (left_x, right_x)
-                        y_hat = model(X).squeeze()
-                        loss = criterion(y_hat, new_y)
-                        preds = out_to_pred_func(y_hat)
-                        real_preds = out_to_real_pred_func[fold](y_hat)
+                    # with torch.cuda.amp.autocast():
+                    X = (left_x, right_x)
+                    y_hat = model(X).squeeze()
+                    loss = criterion(y_hat, new_y)
+                    preds = out_to_pred_func(y_hat)
+                    real_preds = out_to_real_pred_func[fold](y_hat)
 
                 epoch_duration = time.time() - start_batch_time
                 stats.update({
@@ -819,6 +842,54 @@ for fold, (train_loader, test_loader) in enumerate(
                 dict_to_save[name] = stats[name]
                 dict_to_save["validation_" + name] = stats["validation_" + name]
             torch.save(dict_to_save, checkpoint_path.format(epoch))
+        
+        # all_data = []
+        # transformed_ys = []
+        # ys = []
+        # for step, x in enumerate(train_loader):
+        #     x, metadata, _ = x
+        #     left_x = x["surface-lh"].float().cpu().detach()
+        #     right_x = x["surface-rh"].float().cpu().detach()
+        #     if args.to_predict in metadata.keys():
+        #         y = metadata[args.to_predict]
+        #     else:
+        #         y = x["clinical"][:, index_to_predict]
+        #     new_y = label_prepro[fold].transform(np.array(y)[:, np.newaxis])
+        #     transformed_ys.append(new_y)
+        #     ys.append(y)
+        #     data = np.concatenate((left_x, right_x), axis=1).reshape((len(left_x), -1))
+        #     all_data.append(data)
+        # Y = np.concatenate(transformed_ys)
+        # real_y = np.concatenate(ys)
+        # X = np.concatenate(all_data)
+        # print(X.shape)
+        # print(real_y.shape)
+        # linear_model.fit(X, real_y)
+        
+        # test_data = []
+        # test_ys = []
+        # test_transformed_ys = []
+        # for step, x in enumerate(test_loader):
+        #     x, metadata, _ = x
+        #     left_x = x["surface-lh"].float().cpu().detach()
+        #     right_x = x["surface-rh"].float().cpu().detach()
+        #     if args.to_predict in metadata.keys():
+        #         y = metadata[args.to_predict]
+        #     else:
+        #         y = x["clinical"][:, index_to_predict]
+        #     new_y = label_prepro[fold].transform(np.array(y)[:, np.newaxis])
+        #     test_ys.append(y)
+        #     test_transformed_ys.append(new_y)
+        #     with torch.cuda.amp.autocast():
+        #         data = np.concatenate((left_x, right_x), axis=1).reshape((len(left_x), -1))
+        #         test_data.append(data)
+        # X_test = np.concatenate(test_data)
+        # Y_test = np.concatenate(test_transformed_ys)
+        # real_y_test = np.concatenate(test_ys)
+
+        # preds = linear_model.predict(X_test)
+        # print(roc_auc_score(real_y_test, preds))
+        # print(balanced_accuracy_score(real_y_test, preds))
 
     print(json.dumps(stats), file=stats_file)
     # print(stats)
