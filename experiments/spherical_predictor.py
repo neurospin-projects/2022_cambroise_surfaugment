@@ -426,9 +426,9 @@ else:
     tensor_type = "float"
     n_bins = 100
     output_activation = nn.Softmax(dim=1)
-    output_activation = nn.Sigmoid()
-    output_activation = nn.Identity()
-    output_dim = 1
+    # output_activation = nn.Sigmoid()
+    # output_activation = nn.Identity()
+    output_dim = 2
     for idx in range(len(train_loaders)):
         label_prepro.append(TransparentProcessor())
         # out_to_real_pred_func.append(
@@ -446,15 +446,19 @@ else:
             label_prepro[idx].fit(all_label_data[idx][:, np.newaxis])
             print(label_prepro[idx].bin_edges_)
             output_dim = n_bins
-    criterion = nn.CrossEntropyLoss()
-    numb_pos = (all_label_data[-1] == 1).sum()
-    numb_neg = len(all_label_data[-1]) - numb_pos
-    weight_pos = numb_neg / numb_pos
-    print(weight_pos)
-    criterion = nn.BCEWithLogitsLoss(pos_weight=torch.FloatTensor([weight_pos]).to(device))
+    weight = None
+    if args.weight_criterion:
+        pos_value = 2 if args.to_predict == "asd" else 1
+        numb_pos = (all_label_data[-1] == pos_value).sum()
+        numb_neg = len(all_label_data[-1]) - numb_pos
+        weight_pos = numb_neg / numb_pos
+        print(weight_pos)
+        weight = torch.FloatTensor([1, weight_pos]).to(device)
+    criterion = nn.BCEWithLogitsLoss(pos_weight=weight)
+    criterion = nn.CrossEntropyLoss(weight=weight)
     evaluation_against_real_metric = {}
     out_to_pred_func = lambda x: x.argmax(1).cpu().detach().numpy()
-    out_to_pred_func = lambda x: nn.functional.sigmoid(x).round().cpu().detach().numpy()
+    # out_to_pred_func = lambda x: nn.functional.sigmoid(x).round().cpu().detach().numpy()
 
 
 n_features = len(metrics)
