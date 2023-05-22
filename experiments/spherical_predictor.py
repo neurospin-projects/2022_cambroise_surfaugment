@@ -123,6 +123,9 @@ parser.add_argument(
     "--standardize", action="store_true",
     help="optionnally standardize input with statistics computed across"
          "the train dataset.")
+parser.add_argument(
+    "--weight-criterion", action="store_true",
+    help="optionnally weights the criterion according to class unbalance.")
 args = parser.parse_args()
 args.ngpus_per_node = torch.cuda.device_count()
 args.ico_order = 5
@@ -423,7 +426,7 @@ else:
     evaluation_metrics = {"accuracy": accuracy_score, "bacc": balanced_accuracy_score,
                           "auc": roc_auc_score}
     tensor_type = "long"
-    tensor_type = "float"
+    # tensor_type = "float"
     n_bins = 100
     output_activation = nn.Softmax(dim=1)
     # output_activation = nn.Sigmoid()
@@ -453,8 +456,9 @@ else:
         numb_neg = len(all_label_data[-1]) - numb_pos
         weight_pos = numb_neg / numb_pos
         print(weight_pos)
-        weight = torch.FloatTensor([1, weight_pos]).to(device)
-    criterion = nn.BCEWithLogitsLoss(pos_weight=weight)
+        weight = torch.Tensor([1, weight_pos]).to(device)
+        weight_pos = torch.Tensor([weight_pos]).to(device)
+    criterion = nn.BCEWithLogitsLoss(pos_weight=weight_pos)
     criterion = nn.CrossEntropyLoss(weight=weight)
     evaluation_against_real_metric = {}
     out_to_pred_func = lambda x: x.argmax(1).cpu().detach().numpy()
