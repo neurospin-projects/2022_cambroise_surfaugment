@@ -99,7 +99,7 @@ parser.add_argument(
     help="optionnally freezes the backbone network's weights up to some layer."
 )
 parser.add_argument(
-    "--save-freq", default=1, type=int,
+    "--save-freq", default=10, type=int,
     help="saving frequence (as number of epochs) during training.")
 parser.add_argument(
     "--batch-augment", "-ba", default=0.0, type=float,
