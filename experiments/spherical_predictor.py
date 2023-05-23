@@ -450,6 +450,7 @@ else:
             print(label_prepro[idx].bin_edges_)
             output_dim = n_bins
     weight = None
+    weight_pos = None
     if args.weight_criterion:
         pos_value = 2 if args.to_predict == "asd" else 1
         numb_pos = (all_label_data[-1] == pos_value).sum()
@@ -661,12 +662,6 @@ for fold, (train_loader, test_loader) in enumerate(
 
     model = model.to(device)
 
-    checkpoint_path = os.path.join(
-        checkpoint_dir, f"fold_{fold}")
-    if not os.path.isdir(checkpoint_path):
-        os.makedirs(checkpoint_path)
-    checkpoint_path = os.path.join(checkpoint_path, "model_epoch_{}.pth")
-
         # print(model)
     print("Number of trainable parameters : ",
         sum(p.numel() for p in model.parameters() if p.requires_grad))
@@ -837,7 +832,7 @@ for fold, (train_loader, test_loader) in enumerate(
             all_metrics[name][epoch].append(stats["validation_" + name])
             if use_board:
                 board.update_plot("validation " + name, epoch, stats["validation_" + name])
-        if epoch % args.save_freq == 0:
+        if epoch % args.save_freq == 0 and fold == len(train_loaders) - 1:
             dict_to_save = {
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
@@ -851,6 +846,7 @@ for fold, (train_loader, test_loader) in enumerate(
             for name, metric in evaluation_against_real_metric.items():
                 dict_to_save[name] = stats[name]
                 dict_to_save["validation_" + name] = stats["validation_" + name]
+            checkpoint_path = os.path.join(checkpoint_dir, "model_epoch_{}.pth")
             torch.save(dict_to_save, checkpoint_path.format(epoch))
         
         # all_data = []
@@ -936,13 +932,13 @@ for metric in all_metrics.keys():#["real_mae", "real_rmse", "r2", "correlation"]
     best_values_per_metric[metric] = best_values.tolist()
     best_stds_per_metric[metric] = std_metrics[metric][best_epochs].tolist()
 
-with open(os.path.join(checkpoint_dir, 'best_values.json'), 'w') as fp:
+with open(os.path.join(checkpoint_dir, "..", 'best_values.json'), 'w') as fp:
     json.dump(best_values_per_metric, fp)
 
-with open(os.path.join(checkpoint_dir, 'best_epochs.json'), 'w') as fp:
+with open(os.path.join(checkpoint_dir, "..", 'best_epochs.json'), 'w') as fp:
     json.dump(best_epochs_per_metric, fp)
 
-with open(os.path.join(checkpoint_dir, 'best_stds.json'), 'w') as fp:
+with open(os.path.join(checkpoint_dir, "..", 'best_stds.json'), 'w') as fp:
     json.dump(best_stds_per_metric, fp)
 
 final_value_per_metric = {}
