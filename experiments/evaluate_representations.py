@@ -96,7 +96,8 @@ def matching_args_to_case(args, cases):
 
 setups = pd.read_table(args.setups_file)
 if args.pretrained_setup != "None":
-    params, epoch = setups[setups["id"] == int(args.pretrained_setup)][["args", "best_epoch"]].values[0]
+    params, epoch = setups[setups["id"] == int(args.pretrained_setup)][[
+        "args", f"best_epoch_{args.to_predict}"]].values[0]
     pretrained_path = os.path.join(
             "/".join(args.setups_file.split("/")[:-1]),
             "checkpoints", args.pretrained_setup,
@@ -112,8 +113,8 @@ if args.pretrained_setup != "None":
     checkpoints = [checkpoint]
     setup_ids = [int(args.pretrained_setup)]
 else:
-    validation_metric = "mae"
-    best_is_low = True
+    validation_metric = "mae" if args.method == "regression" else "auc"
+    best_is_low = args.method == "regression"
     regressor_params = [0.01, 0.1, 1, 10, 100]
     def cases(latent_dim=128, batch_size=1024):
         cases = dict(
@@ -133,8 +134,11 @@ else:
     cases = cases(128, 1024)
     best_cp_per_case = dict()
     for setup_id in setups["id"].values:
-        params, epoch, best_param, best_value = setups[setups["id"] == setup_id][
-            ["args", "best_epoch", "best_param", "best_value"]].values[0]
+        params, epoch, best_param, best_value = setups[
+            setups["id"] == setup_id][[
+                "args", f"best_epoch_{args.to_predict}",
+                f"best_param_{args.to_predict}",
+                f"best_value_{args.to_predict}"]].values[0]
         compute_stds = False
         same_params_setups = setups[setups["args"] == params]
         if len(same_params_setups) > 1:
@@ -388,9 +392,9 @@ if args.method == "regression":
 else:
     output_dim = len(label_values)
     evaluation_metrics = {"accuracy": accuracy_score,
-                          "bacc": balanced_accuracy_score}
+                          "bacc": balanced_accuracy_score,
+                          "auc": roc_auc_score}
     tensor_type = "long"
-    n_bins = 100
     label_prepro = TransparentProcessor()
     # out_to_real_pred_func = lambda x : x.argmax(1).cpu().detach().numpy()
     if any([type(value) is np.str_ for value in label_values]):
@@ -398,13 +402,8 @@ else:
         label_prepro.fit(all_label_data[:, np.newaxis])
         # out_to_real_pred_func = lambda x : label_prepro.inverse_transform(
         #     x.argmax(1).cpu().detach().unsqueeze(1).numpy()).squeeze()
-    # if output_dim > n_bins:
-    #     label_prepro = KBinsDiscretizer(n_bins=n_bins, encode="ordinal")
-    #     label_prepro.fit(all_label_data[:, np.newaxis])
-    #     print(label_prepro.bin_edges_)
-    #     output_dim = n_bins
     evaluation_against_real_metric = {}
-    validation_metric = "bacc"
+    validation_metric = "auc"
     best_is_low = False
     # out_to_pred_func = lambda x: x.argmax(1).cpu().detach().numpy()
     regressor = LogisticRegression

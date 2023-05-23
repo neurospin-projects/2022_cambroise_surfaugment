@@ -11,7 +11,9 @@ from torch import nn
 from torchvision import transforms
 
 from sklearn.linear_model import Ridge, LogisticRegression
-from sklearn.metrics import accuracy_score, r2_score, mean_squared_error, mean_absolute_error
+from sklearn.metrics import (
+    balanced_accuracy_score, r2_score, mean_squared_error,
+    mean_absolute_error, roc_auc_score)
 
 from multimodaldatasets.datasets import DataManager
 from surfify.utils import icosahedron, downsample, downsample_data
@@ -54,6 +56,12 @@ def encoder_cp_from_model_cp(checkpoint):
 
 
 setups = pd.read_table(args.setups_file)
+if not f"best_epoch_{args.to_predict}" in setups.columns:
+    setups[[
+        f"best_epoch_{args.to_predict}",
+        f"best_param_{args.to_predict}",
+        f"best_value_{args.to_predict}"]] = np.nan
+    setups.to_csv(args.setups_file, index=False, sep="\t")
 
 ico_order = 5
 
@@ -88,9 +96,11 @@ if "clinical" in modalities:
     if args.to_predict in clinical_names:
         index_to_predict = clinical_names.tolist().index(args.to_predict)
 
-evaluation_metrics = {"mae": mean_absolute_error, "r2": r2_score}
-final_metric = "mae"
-what_is_best = {"mae": "lower", "r2": "higher"}
+evaluation_metrics = (
+    {"mae": mean_absolute_error, "r2": r2_score} if args.method == "regression"
+    else {"auc": roc_auc_score, "bacc": balanced_accuracy_score})
+final_metric = "mae" if args.method == "regression" else "auc"
+what_is_best = {"mae": "lower", "r2": "higher", "bacc": "higher", "auc": "higher"}
 
 
 for setup_id in setups["id"].values:
@@ -258,12 +268,16 @@ for setup_id in setups["id"].values:
         print(str(setup_id) + ",".join([f" best {name} : {value}"
               for name, value in best_value_per_metric.items()]))
     all_metrics["epochs"] = epochs
+    print(is_finished)
     if is_finished:
         setups = pd.read_table(args.setups_file)
-        setups.loc[setups["id"] == setup_id, ["best_epoch", "best_param", "best_value"]] = (
-            best_epoch_per_metric[final_metric],
-            best_param_value_per_metric[final_metric],
-            best_value_per_metric[final_metric])
+        setups.loc[setups["id"] == setup_id, [
+            f"best_epoch_{args.to_predict}",
+            f"best_param_{args.to_predict}",
+            f"best_value_{args.to_predict}"]] = (
+                best_epoch_per_metric[final_metric],
+                best_param_value_per_metric[final_metric],
+                best_value_per_metric[final_metric])
         setups.to_csv(args.setups_file, index=False, sep="\t")
         with open(path_to_metrics, 'w') as fp:
             json.dump(all_metrics, fp)

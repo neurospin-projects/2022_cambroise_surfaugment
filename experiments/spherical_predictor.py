@@ -173,7 +173,7 @@ checkpoint = None
 if args.pretrained_setup != "None":
     assert args.setups_file != "None"
     setups = pd.read_table(args.setups_file)
-    params, epoch = setups[setups["id"] == int(args.pretrained_setup)][["args", "best_epoch"]].values[0]
+    params, epoch = setups[setups["id"] == int(args.pretrained_setup)][["args", "best_epoch_age"]].values[0]
     epochs, lr, reduce_lr = args.epochs, args.learning_rate, args.reduce_lr
     args = params_from_args(params, args)
     if args.pretrained_epoch is not None:
