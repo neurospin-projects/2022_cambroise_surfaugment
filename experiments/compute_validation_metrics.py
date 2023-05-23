@@ -14,6 +14,7 @@ from sklearn.linear_model import Ridge, LogisticRegression
 from sklearn.metrics import (
     balanced_accuracy_score, r2_score, mean_squared_error,
     mean_absolute_error, roc_auc_score)
+from sklearn.preprocessing import StandardScaler, OrdinalEncoder
 
 from multimodaldatasets.datasets import DataManager
 from surfify.utils import icosahedron, downsample, downsample_data
@@ -43,6 +44,7 @@ args = parser.parse_args()
 
 
 modalities = ["surface-lh", "surface-rh"]
+all_modalities = modalities.copy()
 metrics = ["thickness", "curv", "sulc"]
 n_features = len(metrics)
 batch_size = 128
@@ -87,20 +89,196 @@ kwargs = {
 if args.data in ["hbn", "euaims"]:
     kwargs["surface-lh"]["symetrized"] = True
     kwargs["surface-rh"]["symetrized"] = True
+    if args.to_predict not in ["sex", "age", "site", "asd"]:
+        all_modalities.append("clinical")
+        kwargs["clinical"] = dict(cols=[args.to_predict])
 
-    modalities.append("clinical")
-
-if "clinical" in modalities:
+if "clinical" in all_modalities:
     clinical_names = np.load(
         os.path.join(args.datadir, "clinical_names.npy"),allow_pickle=True)
     if args.to_predict in clinical_names:
         index_to_predict = clinical_names.tolist().index(args.to_predict)
 
-evaluation_metrics = (
-    {"mae": mean_absolute_error, "r2": r2_score} if args.method == "regression"
-    else {"auc": roc_auc_score, "bacc": balanced_accuracy_score})
-final_metric = "mae" if args.method == "regression" else "auc"
-what_is_best = {"mae": "lower", "r2": "higher", "bacc": "higher", "auc": "higher"}
+# evaluation_metrics = (
+#     {"mae": mean_absolute_error, "r2": r2_score} if args.method == "regression"
+#     else {"auc": roc_auc_score, "bacc": balanced_accuracy_score})
+# final_metric = "mae" if args.method == "regression" else "auc"
+# what_is_best = {"mae": "lower", "r2": "higher", "bacc": "higher", "auc": "higher"}
+# output_activation = nn.Identity()
+# hidden_dim = 256
+# tensor_type = "float"
+# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# out_to_real_pred_func = []
+# root_mean_squared_error = lambda x, y: mean_squared_error(x, y, squared=False)
+# evaluation_against_real_metric = {"real_rmse": root_mean_squared_error, "real_mae": mean_absolute_error, "r2": r2_score, "correlation": corr_metric}
+# label_prepro = lambda x: x.squeeze()
+
+# if args.method == "classification":
+#     output_dim = len(label_values)
+#     evaluation_metrics = {"accuracy": accuracy_score, "bacc": balanced_accuracy_score,
+#                           "auc": roc_auc_score}
+#     tensor_type = "long"
+#     # tensor_type = "float"
+#     n_bins = 100
+#     output_activation = nn.Softmax(dim=1)
+#     # output_activation = nn.Sigmoid()
+#     # output_activation = nn.Identity()
+#     output_dim = 2
+#     for idx in range(len(train_loaders)):
+#         label_prepro.append(TransparentProcessor())
+#         # out_to_real_pred_func.append(
+#         #     lambda x : x.argmax(1).cpu().detach().numpy())
+#         out_to_real_pred_func.append(
+#             lambda x : x.round().cpu().detach().numpy())
+#         if any([type(value) is np.str_ for value in label_values]):
+#             label_prepro[idx] = OrdinalEncoder()
+#             label_prepro[idx].fit(all_label_data[idx][:, np.newaxis])
+#             print(label_prepro[idx].categories_)
+#             out_to_real_pred_func[idx] = lambda x : label_prepro[idx].inverse_transform(
+#                 x.argmax(1).cpu().detach().unsqueeze(1).numpy()).squeeze()
+#         if output_dim > n_bins:
+#             label_prepro[idx] = KBinsDiscretizer(n_bins=n_bins, encode="ordinal")
+#             label_prepro[idx].fit(all_label_data[idx][:, np.newaxis])
+#             print(label_prepro[idx].bin_edges_)
+#             output_dim = n_bins
+test_size = "defaults"
+stratify = ["sex", "age", "site"]
+validation = None
+if (args.data != "openbhb" and not
+    (args.to_predict == "age" and args.data == "privatebhb")):
+    test_size = 0.2
+    validation = 5
+    if args.to_predict == "asd":
+        stratify.append("asd")
+
+dataset = DataManager(
+    dataset=args.data, datasetdir=args.datadir, modalities=all_modalities,
+    stratify=stratify, discretize=["age"], transform=transform,
+    overwrite=False, test_size=test_size, validation=validation,
+    **kwargs)
+
+params_for_validation = {
+    "regression": {"alpha": [0.01, 0.1, 1, 10, 100]},
+    "classification": {"C": [0.01, 0.1, 1, 10, 100]}
+}
+
+best_params = {
+    "regression": {"alpha": 1},
+    "classification": {"C": 1, "max_iter": 10000}
+}
+
+if validation is not None:
+    loaders = []
+    for fold in range(validation):
+        loaders.append(torch.utils.data.DataLoader(
+            dataset["train"][fold]["train"], batch_size=batch_size, num_workers=6,
+            pin_memory=True, shuffle=True))
+    loaders.append(torch.utils.data.DataLoader(
+            dataset["train"]["all"], batch_size=batch_size, num_workers=6,
+            pin_memory=True, shuffle=True))
+else:
+    loaders = [torch.utils.data.DataLoader(
+        dataset["train"], batch_size=batch_size, num_workers=6,
+        pin_memory=True, shuffle=True)]
+
+
+all_label_data = []
+if "clinical" in all_modalities:
+    clinical_names = np.load(
+        os.path.join(args.datadir, "clinical_names.npy"), allow_pickle=True)
+
+for fold_idx, loader in enumerate(loaders):
+    X = {mod: [] for mod in modalities}
+    for data in loader:
+        data, metadata, _ = data
+        if args.to_predict in metadata.keys() and fold_idx == len(loaders) - 1:
+            all_label_data.append(metadata[args.to_predict])
+        elif fold_idx == len(loaders) - 1:
+            index_to_predict = clinical_names.tolist().index(args.to_predict)
+            all_label_data.append(data["clinical"][:, index_to_predict])
+        for modality in modalities:
+            suffix = f"_fold_{fold_idx}"
+            if fold_idx == len(loaders) - 1:
+                suffix = ""
+            path_to_scaler = os.path.join(
+                args.datadir, f"{modality}_scaler{suffix}.save")
+            if (not os.path.exists(path_to_scaler) and
+                not (args.to_predict == "age" and args.data == "privatebhb")):
+                X[modality] += data[modality].view(
+                    (len(data[modality]), -1)).tolist()
+    for modality in modalities:
+        suffix = f"_fold_{fold_idx}"
+        if fold_idx == len(loaders) - 1:
+            suffix = ""
+        path_to_scaler = os.path.join(
+            args.datadir, f"{modality}_scaler{suffix}.save")
+        if (not os.path.exists(path_to_scaler) and
+            not (args.to_predict == "age" and args.data == "privatebhb")):
+            print("Fit scaler")
+            scaler = StandardScaler()
+            scaler.fit(X[modality])
+            joblib.dump(scaler, path_to_scaler)
+
+
+all_label_data = np.concatenate(all_label_data)
+label_values = np.unique(all_label_data)
+# plt.hist(all_label_data)
+
+def corr_metric(y_true, y_pred):
+    mat = np.concatenate([y_true[:, np.newaxis], y_pred[:, np.newaxis]], axis=1)
+    corr_mat = np.corrcoef(mat, rowvar=False)
+    return corr_mat[0, 1]
+
+class TransparentProcessor(object):
+    def __init__(self):
+        super().__init__()
+    
+    def transform(self, x):
+        if type(x) is torch.Tensor:
+            return x.cpu().detach().numpy()
+        return np.asarray(x)
+
+    def fit(self, x):
+        return None
+    
+    def inverse_transform(self, x):
+        return x
+
+output_activation = nn.Identity()
+hidden_dim = 128
+tensor_type = "float"
+out_to_real_pred_func = lambda x: x
+root_mean_squared_error = lambda x, y: mean_squared_error(x, y, squared=False)
+evaluation_against_real_metric = {
+    "mae": mean_absolute_error,
+    "r2": r2_score, "correlation": corr_metric}
+validation_metric = "mae"
+if args.method == "regression":
+    output_dim = 1
+    
+    label_prepro = StandardScaler()
+    label_prepro.fit(all_label_data[:, np.newaxis])
+    
+    evaluation_metrics = {}#"mae": mean_absolute_error}
+    regressor = Ridge
+    out_to_real_pred_func = lambda x: label_prepro.inverse_transform(x).squeeze()
+else:
+    output_dim = len(label_values)
+    evaluation_metrics = {#"accuracy": accuracy_score,
+                          "bacc": balanced_accuracy_score,
+                          "auc": roc_auc_score}
+    tensor_type = "long"
+    label_prepro = TransparentProcessor()
+    if any([type(value) is np.str_ for value in label_values]):
+        label_prepro = OrdinalEncoder()
+        label_prepro.fit(all_label_data[:, np.newaxis])
+        out_to_real_pred_func = lambda x : label_prepro.inverse_transform(
+            x).squeeze()
+    evaluation_against_real_metric = {}
+    validation_metric = "auc"
+    regressor = LogisticRegression
+best_is_low = (args.method == "regression" and
+               validation_metric in ["mae", "mse"])
 
 
 for setup_id in setups["id"].values:
@@ -117,6 +295,18 @@ for setup_id in setups["id"].values:
 
     if not hasattr(local_args, "ico_order"):
         local_args.ico_order = len(conv_filters) + 1
+    
+    path_to_metrics = os.path.join(checkpoints_path, f"validation_metrics_{args.to_predict}.json")
+    last_checkpoint = os.path.join(checkpoints_path,
+                                   f"model_epoch_{local_args.epochs}.pth")
+    # print(local_args.ico_order)
+    # print(os.path.exists(path_to_metrics))
+    # print(checkpoints_path)
+    # print(last_checkpoint)
+    if (local_args.ico_order != 5 or os.path.exists(path_to_metrics)
+        or not os.path.exists(checkpoints_path)
+        or not os.path.exists(last_checkpoint)):
+        continue
 
     encoder = SphericalHemiFusionEncoder(
         n_features, local_args.ico_order, local_args.latent_dim,
@@ -166,21 +356,14 @@ for setup_id in setups["id"].values:
         dataset["test"]["valid"], batch_size=batch_size, num_workers=6,
         pin_memory=True, shuffle=True)
 
-    regressor_params = [0.01, 0.1, 1, 10, 100]
-    param_name = "alpha"
+    
+    param_name = "alpha" if args.method == "regression" else "C"
+    regressor_params = params_for_validation[args.method][param_name]
     all_metrics = {}
     for name in evaluation_metrics.keys():
         all_metrics[name] = []
         for _ in regressor_params:
             all_metrics[name].append([])
-    path_to_metrics = os.path.join(checkpoints_path, "validation_metrics.json")
-    last_checkpoint = os.path.join(checkpoints_path,
-                                   f"model_epoch_{local_args.epochs}.pth")
-
-    if (local_args.ico_order != 5 or os.path.exists(path_to_metrics)
-        or not os.path.exists(checkpoints_path)
-        or not os.path.exists(last_checkpoint)):
-        continue
 
     epochs = []
     is_finished = False
@@ -199,9 +382,9 @@ for setup_id in setups["id"].values:
         encoder.load_state_dict(checkpoint)
         model = encoder.to(device)
         model.eval()
-        regressor = Ridge
         latents = []
         ys = []
+        transformed_ys = []
         for step, x in enumerate(train_loader):
             x, metadata, _ = x
             left_x = x["surface-lh"].float().to(device, non_blocking=True)
@@ -210,11 +393,14 @@ for setup_id in setups["id"].values:
                 y = metadata[args.to_predict]
             else:
                 y = x["clinical"][:, index_to_predict]
+            transformed_y = label_prepro.transform(np.array(y)[:, np.newaxis])
+            transformed_ys.append(transformed_y)
             ys.append(y)
             with torch.cuda.amp.autocast():
                 data = (left_x, right_x)
                 latents.append(model(data).squeeze().detach().cpu().numpy())
-        Y = np.concatenate(ys)
+        Y = np.concatenate(transformed_ys)
+        real_Y = np.concatenate(ys)
         X = np.concatenate(latents)
 
         valid_latents = []
@@ -228,37 +414,47 @@ for setup_id in setups["id"].values:
                 y = metadata[args.to_predict]
             else:
                 y = x["clinical"][:, index_to_predict]
+            transformed_valid_y = label_prepro.transform(np.array(y)[:, np.newaxis])
+            valid_transformed_ys.append(transformed_valid_y)
             valid_ys.append(y)
             with torch.cuda.amp.autocast():
                 data = (left_x, right_x)
                 valid_latents.append(model(data).squeeze().detach().cpu().numpy())
 
         X_valid = np.concatenate(valid_latents)
-        Y_valid = np.concatenate(valid_ys)
+        Y_valid = np.concatenate(valid_transformed_ys)
+        real_y_valid = np.concatenate(valid_ys)
 
         for value_idx, value in enumerate(regressor_params):
-            local_regressor = regressor(**{param_name: value})
+            all_regressor_params = {param_name: value}
+            if args.method == "classification":
+                all_regressor_params["max_iter"] = 10000
+            local_regressor = regressor(**all_regressor_params)
             local_regressor.fit(X, Y)
             y_hat_valid = local_regressor.predict(X_valid)
+            real_preds = out_to_real_pred_func(y_hat_valid)
+
             for name, metric in evaluation_metrics.items():
                 all_metrics[name][value_idx].append(metric(Y_valid, y_hat_valid))
+            for name, metric in evaluation_against_real_metric.items():
+                all_metrics[name][value_idx].append(metric(real_y_valid, real_preds))
     
     if len(epochs) > 0:
         best_epoch_per_metric = {}
         best_value_per_metric = {}
         best_param_value_per_metric = {}
-        for name in evaluation_metrics.keys():
+        for name in all_metrics.keys():
             best_epoch_per_metric[name] = []
             best_value_per_metric[name] = []
             for value_idx, _ in enumerate(regressor_params):
                 sorted_indices = np.argsort(all_metrics[name][value_idx])
-                best_index = 0 if what_is_best[name] == "lower" else -1
+                best_index = 0 if best_is_low else -1
                 best_epoch = epochs[sorted_indices[best_index]]
                 best_value = all_metrics[name][value_idx][sorted_indices[best_index]]
                 best_epoch_per_metric[name].append(best_epoch)
                 best_value_per_metric[name].append(best_value)
             sorted_indices = np.argsort(best_value_per_metric[name])
-            best_index = 0 if what_is_best[name] == "lower" else -1
+            best_index = 0 if best_is_low else -1
             best_epoch = best_epoch_per_metric[name][sorted_indices[best_index]]
             best_value = best_value_per_metric[name][sorted_indices[best_index]]
             best_param_value = regressor_params[sorted_indices[best_index]]
@@ -275,9 +471,9 @@ for setup_id in setups["id"].values:
             f"best_epoch_{args.to_predict}",
             f"best_param_{args.to_predict}",
             f"best_value_{args.to_predict}"]] = (
-                best_epoch_per_metric[final_metric],
-                best_param_value_per_metric[final_metric],
-                best_value_per_metric[final_metric])
+                best_epoch_per_metric[validation_metric],
+                best_param_value_per_metric[validation_metric],
+                best_value_per_metric[validation_metric])
         setups.to_csv(args.setups_file, index=False, sep="\t")
         with open(path_to_metrics, 'w') as fp:
             json.dump(all_metrics, fp)
