@@ -358,7 +358,7 @@ for modality in modalities:
     if args.blur:
         ico = backbone.ico[args.ico_order]
         trf = SurfBlur(
-            ico.vertices, ico.triangles, None,
+            ico.vertices, ico.triangles,
             sigma=interval((0.1, 2), float),
             cachedir=os.path.join(args.outdir, "cached_ico_infos"))
         if args.algo == "barlow":
@@ -367,7 +367,7 @@ for modality in modalities:
         else:
             transformer.register(trf, probability=0.5)
     if args.noise:
-        trf = SurfNoise, interval(sigma=interval((0.1, 2), float))
+        trf = SurfNoise(interval(sigma=interval((0.1, 2), float)))
         if args.algo == "barlow":
             transformer.register(trf, pipeline="hard")
             transformer.register(trf, probability=0.1, pipeline="soft")
@@ -378,7 +378,7 @@ for modality in modalities:
         t = time.time()
         patch_size = min_depth_to_get_n_neighbors(np.ceil(len(ico.vertices) / 4))
         trf = SurfCutOut(
-            ico.vertices, ico.triangles, None,
+            ico.vertices, ico.triangles,
             patch_size=interval((1, patch_size), int),
             cachedir=os.path.join(args.outdir, "cached_ico_infos"))
         # print(time.time() - t)
