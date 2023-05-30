@@ -628,7 +628,7 @@ for fold, (train_loader, test_loader) in enumerate(
     if args.freeze_up_to != 0:
         number_of_layers_per_layer = 2 if not args.batch_norm else 3
         if args.freeze_up_to < 0:
-            args.freeze_up_to = len(all_encoder_params) - args.freeze_up_to
+            args.freeze_up_to = len(all_encoder_params) + args.freeze_up_to
         for idx in range(len(all_encoder_params)):
             fused = idx >= args.fusion_level * 2 * number_of_layers_per_layer
             idx_after_fusion = idx - args.fusion_level * 2 * number_of_layers_per_layer
@@ -665,6 +665,7 @@ for fold, (train_loader, test_loader) in enumerate(
         # print(model)
     print("Number of trainable parameters : ",
         sum(p.numel() for p in model.parameters() if p.requires_grad))
+    print(list(p.shape for p in model.parameters() if p.requires_grad))
 
     optimizer = optim.Adam(model.parameters(), args.learning_rate,
                         weight_decay=args.weight_decay)

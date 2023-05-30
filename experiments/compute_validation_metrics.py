@@ -261,7 +261,7 @@ if args.method == "regression":
     
     evaluation_metrics = {}#"mae": mean_absolute_error}
     regressor = Ridge
-    out_to_real_pred_func = lambda x: label_prepro.inverse_transform(x).squeeze()
+    out_to_real_pred_func = lambda x: label_prepro.inverse_transform(x[:, np.newaxis]).squeeze()
 else:
     output_dim = len(label_values)
     evaluation_metrics = {#"accuracy": accuracy_score,
@@ -273,7 +273,7 @@ else:
         label_prepro = OrdinalEncoder()
         label_prepro.fit(all_label_data[:, np.newaxis])
         out_to_real_pred_func = lambda x : label_prepro.inverse_transform(
-            x).squeeze()
+            x[:, np.newaxis]).squeeze()
     evaluation_against_real_metric = {}
     validation_metric = "auc"
     regressor = LogisticRegression
@@ -364,6 +364,10 @@ for setup_id in setups["id"].values:
         all_metrics[name] = []
         for _ in regressor_params:
             all_metrics[name].append([])
+    for name in evaluation_against_real_metric.keys():
+        all_metrics[name] = []
+        for _ in regressor_params:
+            all_metrics[name].append([])
 
     epochs = []
     is_finished = False
@@ -393,7 +397,8 @@ for setup_id in setups["id"].values:
                 y = metadata[args.to_predict]
             else:
                 y = x["clinical"][:, index_to_predict]
-            transformed_y = label_prepro.transform(np.array(y)[:, np.newaxis])
+            transformed_y = label_prepro.transform(
+                np.array(y)[:, np.newaxis]).squeeze()
             transformed_ys.append(transformed_y)
             ys.append(y)
             with torch.cuda.amp.autocast():
@@ -414,7 +419,8 @@ for setup_id in setups["id"].values:
                 y = metadata[args.to_predict]
             else:
                 y = x["clinical"][:, index_to_predict]
-            transformed_valid_y = label_prepro.transform(np.array(y)[:, np.newaxis])
+            transformed_valid_y = label_prepro.transform(
+                np.array(y)[:, np.newaxis]).squeeze()
             valid_transformed_ys.append(transformed_valid_y)
             valid_ys.append(y)
             with torch.cuda.amp.autocast():
@@ -435,7 +441,7 @@ for setup_id in setups["id"].values:
             real_preds = out_to_real_pred_func(y_hat_valid)
 
             for name, metric in evaluation_metrics.items():
-                all_metrics[name][value_idx].append(metric(Y_valid, y_hat_valid))
+                all_metrics[name][value_idx].append(metric(Y_valid, y_hat_valid.squeeze()))
             for name, metric in evaluation_against_real_metric.items():
                 all_metrics[name][value_idx].append(metric(real_y_valid, real_preds))
     
@@ -464,7 +470,6 @@ for setup_id in setups["id"].values:
         print(str(setup_id) + ",".join([f" best {name} : {value}"
               for name, value in best_value_per_metric.items()]))
     all_metrics["epochs"] = epochs
-    print(is_finished)
     if is_finished:
         setups = pd.read_table(args.setups_file)
         setups.loc[setups["id"] == setup_id, [

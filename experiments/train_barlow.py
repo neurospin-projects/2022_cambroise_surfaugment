@@ -19,7 +19,7 @@ import torch
 from torch import nn, optim
 from torchvision import transforms
 from surfify.models import SphericalHemiFusionEncoder
-from surfify.augmentation import SphericalRandomCut, SphericalBlur, SphericalNoise
+from surfify.augmentation import SurfCutOut, SurfBlur, SurfNoise
 from surfify.utils import setup_logging, icosahedron, downsample_data, downsample, min_depth_to_get_n_neighbors
 from brainboard import Board
 
@@ -357,7 +357,7 @@ for modality in modalities:
         transformer.register(Normalize())
     if args.blur:
         ico = backbone.ico[args.ico_order]
-        trf = SphericalBlur(
+        trf = SurfBlur(
             ico.vertices, ico.triangles, None,
             sigma=(0.1, 2),
             cachedir=os.path.join(args.outdir, "cached_ico_infos"))
@@ -367,7 +367,7 @@ for modality in modalities:
         else:
             transformer.register(trf, probability=0.5)
     if args.noise:
-        trf = SphericalNoise(sigma=(0.1, 2))
+        trf = SurfNoise(sigma=(0.1, 2))
         if args.algo == "barlow":
             transformer.register(trf, pipeline="hard")
             transformer.register(trf, probability=0.1, pipeline="soft")
@@ -377,7 +377,7 @@ for modality in modalities:
         ico = backbone.ico[args.ico_order]
         t = time.time()
         patch_size = min_depth_to_get_n_neighbors(np.ceil(len(ico.vertices) / 4))
-        trf = SphericalRandomCut(
+        trf = SurfCutOut(
             ico.vertices, ico.triangles, None,
             patch_size=patch_size,
             cachedir=os.path.join(args.outdir, "cached_ico_infos"))
