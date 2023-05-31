@@ -50,7 +50,6 @@ class Transformer(object):
         for transform in transforms.values():
             transformed = torch.clone(arr)
             for trf in transform:
-                print(transformed.type())
                 if np.random.rand() < trf.probability:
                     transformed = trf.transform(transformed)
             all_transformed.append(transformed)
