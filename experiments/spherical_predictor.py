@@ -405,7 +405,7 @@ label_prepro = []
 if args.method == "regression":
     output_dim = 1
     for idx in range(len(train_loaders)):
-        label_prepro[idx] = StandardScaler()
+        label_prepro[idx].append(StandardScaler())
         label_prepro[idx].fit(all_label_data[idx][:, np.newaxis])
         out_to_real_pred_func.append(
             lambda x: label_prepro[idx].inverse_transform(
