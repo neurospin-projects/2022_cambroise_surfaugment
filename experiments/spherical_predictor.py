@@ -198,7 +198,15 @@ args.batch_size = 256
 
 input_shape = (len(metrics), len(ico_verts))
 
-validation = 5
+test_size = "defaults"
+stratify = ["sex", "age", "site"]
+validation = None
+if (args.data != "openbhb" and not
+    (args.to_predict == "age" and args.data == "privatebhb")):
+    test_size = 0.2
+    validation = 5
+    if args.to_predict == "asd":
+        stratify.append("asd")
 
 scaling = args.standardize
 normalize = args.normalize
@@ -306,9 +314,6 @@ kwargs = {
     # "test_size": 0.2
 }
 
-stratify = ["sex", "age", "site"]
-if args.to_predict == "asd":
-    stratify.append("asd")
 all_modalities = modalities.copy()
 if args.data in ["hbn", "euaims"]:
     kwargs["surface-lh"]["symetrized"] = True
@@ -323,24 +328,24 @@ if args.data == "openbhb":
     kwargs["test_size"] = None
 
 
+
 dataset = DataManager(dataset=args.data, datasetdir=args.datadir,
                       modalities=all_modalities, validation=validation,
                       stratify=stratify, discretize=["age"],
                       transform=transform, on_the_fly_transform=on_the_fly_transform,
                       overwrite=False, test_size=test_size, **kwargs)
-# dataset.create_val_from_test(
-#     val_size=0.5, stratify=stratify, discretize=["age"])
-
-
-loader = torch.utils.data.DataLoader(
-    dataset["train"], batch_size=args.batch_size, num_workers=6,
-    pin_memory=True, shuffle=True)
+if args.data == "openbhb":
+    dataset.create_val_from_test(
+        val_size=0.5, stratify=stratify, discretize=["age"])
 
 valid_loaders = []
 if validation is None:
     train_loaders = [torch.utils.data.DataLoader(
         dataset["train"], batch_size=args.batch_size, num_workers=6,
-        pin_memory=True, shuffle=True)]
+        pin_memory=True, shuffle=True)] * 2
+    valid_loaders.append(torch.utils.data.DataLoader(
+        dataset["test"]["valid"], batch_size=args.batch_size, num_workers=6,
+        pin_memory=True, shuffle=True))
 else:
     train_loaders = []
     for fold in range(validation):
@@ -354,8 +359,8 @@ else:
             dataset["train"]["all"], batch_size=args.batch_size,
             num_workers=6, pin_memory=True, shuffle=True))
 test_dataset = dataset["test"]
-# if local_args.data_train == args.data:
-#     test_dataset = test_dataset["test"]
+if args.data == "openbhb":
+    test_dataset = test_dataset["test"]
 test_loader = torch.utils.data.DataLoader(
     test_dataset, batch_size=args.batch_size, num_workers=6,
     pin_memory=True, shuffle=True)
