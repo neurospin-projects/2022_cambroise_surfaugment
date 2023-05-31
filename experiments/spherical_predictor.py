@@ -305,29 +305,20 @@ batch_transforms = None
 batch_transforms_valid = None
 
 # downsampler = wrapper_data_downsampler(args.outdir, to_order=args.ico_order)
-test_size = None
 kwargs = {
     "surface-rh": {"metrics": metrics,
                    "z_score": False},
     "surface-lh": {"metrics": metrics,
                    "z_score": False},
-    # "test_size": 0.2
 }
 
 all_modalities = modalities.copy()
 if args.data in ["hbn", "euaims"]:
     kwargs["surface-lh"]["symetrized"] = True
-
     kwargs["surface-rh"]["symetrized"] = True
 
     if args.to_predict not in stratify:
         all_modalities.append("clinical")
-    test_size = 0.2
-
-if args.data == "openbhb":
-    kwargs["test_size"] = None
-
-
 
 dataset = DataManager(dataset=args.data, datasetdir=args.datadir,
                       modalities=all_modalities, validation=validation,
