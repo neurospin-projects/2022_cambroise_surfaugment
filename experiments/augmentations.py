@@ -43,12 +43,16 @@ class Transformer(object):
     def __call__(self, arr):
         """ Apply the registered transformations.
         """
+        print("here")
+        print(self.transforms)
         transforms = self.transforms
         if type(transforms) is list:
             transforms = dict(one_and_only=transforms)
         all_transformed = []
         for transform in transforms.values():
+            print(arr.type())
             transformed = torch.clone(arr)
+            print(arr.type())
             for trf in transform:
                 if np.random.rand() < trf.probability:
                     transformed = trf.transform(transformed)
