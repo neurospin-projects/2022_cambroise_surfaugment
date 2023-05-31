@@ -405,13 +405,13 @@ label_prepro = []
 if args.method == "regression":
     output_dim = 1
     for idx in range(len(train_loaders)):
-        label_prepro.append(StandardScaler())
-        label_prepro[idx].fit(all_label_data[idx][:, np.newaxis])
+        preprocessor = StandardScaler()
+        preprocessor.fit(all_label_data[idx][:, np.newaxis])
+        label_prepro.append(preprocessor)
         out_to_real_pred_func.append(
-            lambda x: label_prepro[idx].inverse_transform(
+            lambda x: preprocessor.inverse_transform(
                 x.cpu().detach().unsqueeze(1)).squeeze())
     # output_activation = DifferentiableRound(label_prepro.scale_)
-    print(len(train_loaders))
     criterion = nn.MSELoss()
     if args.loss == "l1":
         criterion = nn.L1Loss()
