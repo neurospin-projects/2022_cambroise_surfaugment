@@ -411,7 +411,7 @@ if args.method == "regression":
             lambda x: label_prepro[idx].inverse_transform(
                 x.cpu().detach().unsqueeze(1)).squeeze())
     # output_activation = DifferentiableRound(label_prepro.scale_)
-
+    print(len(train_loaders))
     criterion = nn.MSELoss()
     if args.loss == "l1":
         criterion = nn.L1Loss()
