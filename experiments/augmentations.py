@@ -43,8 +43,6 @@ class Transformer(object):
     def __call__(self, arr):
         """ Apply the registered transformations.
         """
-        print("here")
-        print(self.transforms)
         transforms = self.transforms
         if type(transforms) is list:
             transforms = dict(one_and_only=transforms)
