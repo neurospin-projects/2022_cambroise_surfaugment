@@ -293,7 +293,7 @@ if args.batch_augment > 0 or args.standardize:
             scalers[modality] =  transforms.Compose([
                 Reshape((1, -1)),
                 scaler.transform,
-                transforms.ToTensor(),
+                torch.FloatTensor,
                 torch.squeeze,
                 Reshape(input_shape),
             ])
