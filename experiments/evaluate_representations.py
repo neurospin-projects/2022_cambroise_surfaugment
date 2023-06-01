@@ -124,12 +124,24 @@ else:
             "blur": True, "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
             c={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
             "blur": True, "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
-            d={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": True,
+            d={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": False,
+            "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
+            e={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": False, "blur": True,
+            "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
+            f={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": False, "blur": False,
+            "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
+            g={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": True,
             "noise": True, "latent_dim": latent_dim, "batch_size": batch_size},
-            e={"algo": "barlow", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
+            h={"algo": "barlow", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
             "blur": True, "noise": True, "latent_dim": latent_dim, "batch_size": batch_size},
-            f={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
-            "blur": True, "noise": True, "latent_dim": latent_dim, "batch_size": batch_size})
+            i={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
+            "blur": True, "noise": True, "latent_dim": latent_dim, "batch_size": batch_size},
+            j={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": False,
+            "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
+            k={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": 0, "cutout": False, "blur": True,
+            "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
+            l={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": 0, "cutout": False, "blur": False,
+            "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},)
         return cases
     cases = cases(128, 1024)
     best_cp_per_case = dict()

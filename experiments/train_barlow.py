@@ -367,7 +367,7 @@ for modality in modalities:
         else:
             transformer.register(trf, probability=0.5)
     if args.noise:
-        trf = SurfNoise(interval(sigma=interval((0.1, 2), float)))
+        trf = SurfNoise(sigma=interval((0.1, 2), float))
         if args.algo == "barlow":
             transformer.register(trf, pipeline="hard")
             transformer.register(trf, probability=0.1, pipeline="soft")
