@@ -174,7 +174,7 @@ else:
                         "/".join(args.setups_file.split("/")[:-1]),
                         "checkpoints", str(_setup_id))
                     validation_metrics_path = os.path.join(
-                        cp_path, "validation_metrics.json")
+                        cp_path, f"validation_metrics_{args.to_predict}.json")
                     if not os.path.exists(validation_metrics_path):
                         continue
                     with open(validation_metrics_path, "r") as f:
