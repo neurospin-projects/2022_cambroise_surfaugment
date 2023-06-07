@@ -411,7 +411,7 @@ else:
         label_prepro = OrdinalEncoder()
         label_prepro.fit(all_label_data[:, np.newaxis])
         out_to_real_pred_func = lambda x : label_prepro.inverse_transform(
-            x).squeeze()
+            x[:, np.newaxis]).squeeze()
     evaluation_against_real_metric = {}
     validation_metric = "auc"
     best_is_low = False
