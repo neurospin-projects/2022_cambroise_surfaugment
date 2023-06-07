@@ -140,6 +140,7 @@ else:
         return cases
     cases = cases(128, 1024)
     best_cp_per_case = dict()
+    to_predict, method = args.to_predict, args.method
     for setup_id in setups["id"].values:
         params, epoch, best_param, best_value = setups[
             setups["id"] == setup_id][[
@@ -150,9 +151,7 @@ else:
         same_params_setups = setups[setups["args"] == params]
         if len(same_params_setups) > 1:
             compute_stds = True
-        to_predict, method = args.to_predict, args.method
         local_args, supervised = params_from_args(params, args)
-        args.to_predict, args.method = to_predict, method
         if not hasattr(local_args, "algo"):
             local_args.algo = "barlow"
         if not hasattr(local_args, "sigma"):
@@ -250,6 +249,7 @@ else:
                              if case in best_cp_per_case.keys()]
     cases_names = [case for case in cases.keys()
                    if case in best_cp_per_case.keys()]
+    args.to_predict, args.method = to_predict, method
 
 print(setup_ids)
 input_shape = (len(metrics), len(icosahedron(args.ico_order)[0]))
