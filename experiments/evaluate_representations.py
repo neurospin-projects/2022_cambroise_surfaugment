@@ -302,7 +302,7 @@ params_for_validation = {
 
 best_params = {
     "regression": {"alpha": 1},
-    "classification": {"C": 1, "max_iter": 10000}
+    "classification": {"C": 1, "max_iter": 10000, "verbose":-1}
 }
 
 if validation is not None:
@@ -407,16 +407,16 @@ else:
                           "auc": roc_auc_score}
     tensor_type = "long"
     label_prepro = TransparentProcessor()
-    # out_to_real_pred_func = lambda x : x.argmax(1).cpu().detach().numpy()
+    out_to_real_pred_func = lambda x : x.squeeze()
     if any([type(value) is np.str_ for value in label_values]):
         label_prepro = OrdinalEncoder()
         label_prepro.fit(all_label_data[:, np.newaxis])
-        # out_to_real_pred_func = lambda x : label_prepro.inverse_transform(
-        #     x.argmax(1).cpu().detach().unsqueeze(1).numpy()).squeeze()
+        out_to_real_pred_func = lambda x : label_prepro.inverse_transform(
+            x).squeeze()
     evaluation_against_real_metric = {}
     validation_metric = "auc"
     best_is_low = False
-    # out_to_pred_func = lambda x: x.argmax(1).cpu().detach().numpy()
+    out_to_pred_func = lambda x: x.squeeze()
     regressor = LogisticRegression
 
 for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
@@ -653,6 +653,7 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
                     local_params = {param_name: value}
                     if args.method == "classification":
                         local_params["max_iter"] = 10000
+                        local_params["verbose"] = -1
                     local_regressor = regressor(**local_params)
                     local_regressor.fit(X, Y)
                     y_hat = local_regressor.predict(X_test)
