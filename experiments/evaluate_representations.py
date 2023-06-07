@@ -615,7 +615,7 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
                     y = metadata[args.to_predict]
                 else:
                     y = x["clinical"][:, index_to_predict]
-                new_y = label_prepro.transform(np.array(y)[:, np.newaxis])
+                new_y = label_prepro.transform(np.array(y)[:, np.newaxis]).squeeze()
                 transformed_ys.append(new_y)
                 ys.append(y)
                 with torch.cuda.amp.autocast():
@@ -636,7 +636,7 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
                     y = metadata[args.to_predict]
                 else:
                     y = x["clinical"][:, index_to_predict]
-                new_y = label_prepro.transform(np.array(y)[:, np.newaxis])
+                new_y = label_prepro.transform(np.array(y)[:, np.newaxis]).squeeze()
                 test_ys.append(y)
                 test_transformed_ys.append(new_y)
                 with torch.cuda.amp.autocast():
@@ -655,7 +655,7 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
                         local_params["max_iter"] = 20000
                     local_regressor = regressor(**local_params)
                     local_regressor.fit(X, Y)
-                    y_hat = local_regressor.predict(X_test)
+                    y_hat = local_regressor.predict(X_test).squeeze()
 
                     preds = out_to_pred_func(y_hat)
                     real_preds = out_to_real_pred_func(y_hat)
@@ -674,7 +674,7 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
             if fold == len(train_loaders) - 1:
                 local_regressor = regressor(**best_params[args.method])
                 local_regressor.fit(X, Y)
-                y_hat = local_regressor.predict(X_test)
+                y_hat = local_regressor.predict(X_test).squeeze()
 
                 preds = out_to_pred_func(y_hat)
                 real_preds = out_to_real_pred_func(y_hat)
