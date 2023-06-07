@@ -279,7 +279,9 @@ for setup_id in setups["id"].values:
     if int(setup_id) < 10000:
         cp_name = params
         checkpoints_path = "/".join(cp_name.split("/")[:-1])
+    to_predict, method = args.to_predict, args.method
     local_args, supervised = params_from_args(params, args)
+    args.to_predict, args.method = to_predict, method
     conv_filters = [int(num) for num in local_args.conv_filters.split("-")]
 
     if not hasattr(local_args, "ico_order"):
