@@ -150,7 +150,9 @@ else:
         same_params_setups = setups[setups["args"] == params]
         if len(same_params_setups) > 1:
             compute_stds = True
+        to_predict, method = args.to_predict, args.method
         local_args, supervised = params_from_args(params, args)
+        args.to_predict, args.method = to_predict, method
         if not hasattr(local_args, "algo"):
             local_args.algo = "barlow"
         if not hasattr(local_args, "sigma"):
@@ -424,7 +426,9 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
         list(evaluation_metrics) + list(evaluation_against_real_metric))}
     for setup_idx, _setup_id in enumerate(setup_id):
         params = setups[setups["id"] == _setup_id]["args"].values[0]
+        to_predict, method = args.to_predict, args.method
         local_args, supervised = params_from_args(params, args)
+        args.to_predict, args.method = to_predict, method
         best_params["regression"]["alpha"] = best_regressor_params[case_id] 
 
         conv_filters = [int(num) for num in local_args.conv_filters.split("-")]
