@@ -107,8 +107,8 @@ if args.pretrained_setup != "None":
     checkpoints = [checkpoint]
     setup_ids = [int(args.pretrained_setup)]
 else:
-    validation_metric = "mae"# if args.method == "regression" else "auc"
-    best_is_low = True#args.method == "regression"
+    validation_metric = "mae" if args.method == "regression" else "auc"
+    best_is_low = args.method == "regression"
     regressor_params = [0.01, 0.1, 1, 10, 100]
     def cases(latent_dim=128, batch_size=1024):
         cases = dict(
@@ -172,7 +172,7 @@ else:
                         "/".join(args.setups_file.split("/")[:-1]),
                         "checkpoints", str(_setup_id))
                     validation_metrics_path = os.path.join(
-                        cp_path, f"validation_metrics_age.json")##{args.to_predict}.json")
+                        cp_path, f"validation_metrics_{args.to_predict}.json")
                     if not os.path.exists(validation_metrics_path):
                         continue
                     with open(validation_metrics_path, "r") as f:
