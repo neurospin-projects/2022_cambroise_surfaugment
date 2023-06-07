@@ -302,7 +302,7 @@ params_for_validation = {
 
 best_params = {
     "regression": {"alpha": 1},
-    "classification": {"C": 1, "max_iter": 10000, "verbose":-1}
+    "classification": {"C": 1, "max_iter": 20000}
 }
 
 if validation is not None:
@@ -652,8 +652,7 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
                 for value_idx, value in enumerate(params[param_name]):
                     local_params = {param_name: value}
                     if args.method == "classification":
-                        local_params["max_iter"] = 10000
-                        local_params["verbose"] = -1
+                        local_params["max_iter"] = 20000
                     local_regressor = regressor(**local_params)
                     local_regressor.fit(X, Y)
                     y_hat = local_regressor.predict(X_test)
