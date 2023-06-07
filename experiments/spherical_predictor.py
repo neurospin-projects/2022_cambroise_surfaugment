@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import time
+import shutil
 import numpy as np
 from tqdm import tqdm
 import joblib
@@ -61,10 +62,6 @@ parser.add_argument(
     "--print-freq", default=1, type=int,
     help="printing frequence (as number of epochs) during training.")
 parser.add_argument(
-    "--augment-data", action="store_true",
-    help="optionnally uses augmentations during training."
-)
-parser.add_argument(
     "--to-predict", default="age",
     help="the name of the variable to predict.")
 parser.add_argument(
@@ -73,12 +70,6 @@ parser.add_argument(
 parser.add_argument(
     "--loss", default="mse", choices=("mse", "l1"),
     help="the loss function.")
-parser.add_argument(
-    "--bin-step", default=1, type=int,
-    help="the size of a bin when method is 'distribution'.")
-parser.add_argument(
-    "--sigma", default=1, type=float,
-    help="the soft labels' gaussian's sigma when method is 'distribution'.")
 parser.add_argument(
     "--dropout-rate", "-dr", default=0, type=float,
     help="the dropout rate applied before predictor.")
@@ -101,12 +92,12 @@ parser.add_argument(
 parser.add_argument(
     "--save-freq", default=10, type=int,
     help="saving frequence (as number of epochs) during training.")
-parser.add_argument(
-    "--batch-augment", "-ba", default=0.0, type=float,
-    help="optionnally uses batch augmentation.")
-parser.add_argument(
-    "--inter-modal-augment", "-ima", default=0.0, type=float,
-    help="optionnally uses inter modality augment.")
+# parser.add_argument(
+#     "--batch-augment", "-ba", default=0.0, type=float,
+#     help="optionnally uses batch augmentation.")
+# parser.add_argument(
+#     "--inter-modal-augment", "-ima", default=0.0, type=float,
+#     help="optionnally uses inter modality augment.")
 parser.add_argument(
     "--momentum", default=0.0, type=float,
     help="optionnally uses SGD with momentum.")
@@ -129,6 +120,25 @@ parser.add_argument(
 args = parser.parse_args()
 args.ngpus_per_node = torch.cuda.device_count()
 args.ico_order = 5
+modalities = ["surface-lh", "surface-rh"]
+metrics = ["thickness", "curv", "sulc"]
+args.conv = "DiNe"
+n_features = len(metrics)
+activation = "ReLU"
+if args.method == "classification":
+    args.loss = "ce"
+
+params = ("predict_{}_with_{}_on_{}_surf_order_{}_with_{}_features_fusion_{}_act_{}"
+    "_bn_{}_conv_{}_latent_{}_wd_{}_{}_epochs_lr_{}_reduced_{}_bs_{}"
+    "_normalize_{}_standardize_{}_loss_{}_weighted_{}_mixup_{}"
+    "_momentum_{}_fut_{}_pretrained_setup_{}_epoch_{}_dr_{}_nlp_{}").format(
+        args.to_predict, args.method, args.data, args.ico_order, n_features, args.fusion_level,
+        activation, args.batch_norm, "-".join([str(s) for s in args.conv_filters]),
+        args.latent_dim, args.weight_decay, args.epochs, args.learning_rate,
+        args.reduce_lr, args.batch_size, args.normalize, args.standardize,
+        args.loss, args.weight_criterion, args.mixup, args.momentum,
+        args.freeze_up_to, args.pretrained_setup, args.pretrained_epoch,
+        args.dropout_rate, args.n_layers_predictor)
 
 # Prepare process
 run_id = int(time.time())
@@ -146,10 +156,53 @@ stats_file = open(os.path.join(checkpoint_dir, "stats.txt"), "a", buffering=1)
 print(" ".join(sys.argv))
 print(" ".join(sys.argv), file=stats_file)
 
+setups = pd.read_table(
+    os.path.join(args.outdir, "predict_{}".format(args.to_predict), "setups.tsv"))
+run_id = int(time.time())
+
+def same_params_but_epochs(args_str):
+    epochs = args_str.split("_epochs")[0].split("_")[-1]
+    return (params == args_str.replace(
+        f"{epochs}_epochs", f"{args.epochs}_epochs"))
+
+if args.start_epoch > 1:
+    old_run_id = setups.loc[setups.args == params, "id"]
+    other_run_id = setups.loc[setups.args.apply(same_params_but_epochs), "id"]
+    if len(old_run_id) == 0 and len(other_run_id) > 0:
+        other_run_id = other_run_id.values[0]
+        print(other_run_id)
+        old_path = os.path.join(checkpoint_dir, str(other_run_id))
+        new_path = os.path.join(checkpoint_dir, str(run_id))
+        os.makedirs(new_path)
+        for file_name in os.listdir(old_path):
+            old_file = os.path.join(old_path, file_name)
+            new_file = os.path.join(new_path, file_name)
+            if os.path.isfile(old_file):
+                shutil.copy(old_file, new_file)
+    else:
+        if len(old_run_id) > 1 and args.run_id == -1:
+            raise ValueError("Parameters are ambiguous. You should provide a "
+                             "run id to know what training to resume.")
+        elif args.run_id != -1:
+            run_id = args.run_id
+        else:
+            run_id = old_run_id.item()
+            
+else:
+    setups = pd.concat([
+        setups,
+        pd.DataFrame({
+            "id": [run_id],
+            "args": [params],
+            "best_epoch": [0],
+            "best_param": [1],
+            "best_value": [1000]})],
+        ignore_index=True)
+    setups.to_csv(os.path.join(args.outdir, "predict_{}".format(args.to_predict), "setups.tsv"),
+        index=False, sep="\t")
+print(run_id)
+
 # Load the input cortical data
-modalities = ["surface-lh", "surface-rh"]
-metrics = ["thickness", "curv", "sulc"]
-args.conv = "DiNe"
 transform = None
 
 order = 7
@@ -477,7 +530,6 @@ def mixup_data(left_x, right_x, y, l):
 def mixup_criterion(criterion, pred, y_a, y_b, l):
     return l * criterion(pred, y_a) + (1 - l) * criterion(pred, y_b)
 
-activation = "ReLU"
 use_board = False
 show_pbar = True
 

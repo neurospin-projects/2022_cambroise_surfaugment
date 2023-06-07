@@ -20,7 +20,7 @@ from multimodaldatasets.datasets import DataManager
 from surfify.utils import icosahedron, downsample, downsample_data
 from surfify.models import SphericalHemiFusionEncoder
 from augmentations import Normalize, Reshape, Transformer
-from utils import params_from_args
+from utils import params_from_args, encoder_cp_from_model_cp
 
 
 parser = argparse.ArgumentParser(description="Spherical predictor")
@@ -49,12 +49,6 @@ metrics = ["thickness", "curv", "sulc"]
 n_features = len(metrics)
 batch_size = 128
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-def encoder_cp_from_model_cp(checkpoint):
-    name_to_check = "backbone"
-    checkpoint = {".".join(key.split(".")[1:]): value 
-                for key, value in checkpoint["model_state_dict"].items() if name_to_check in key}
-    return checkpoint
 
 
 setups = pd.read_table(args.setups_file)
@@ -160,11 +154,6 @@ dataset = DataManager(
 params_for_validation = {
     "regression": {"alpha": [0.01, 0.1, 1, 10, 100]},
     "classification": {"C": [0.01, 0.1, 1, 10, 100]}
-}
-
-best_params = {
-    "regression": {"alpha": 1},
-    "classification": {"C": 1, "max_iter": 10000}
 }
 
 if validation is not None:
@@ -290,7 +279,7 @@ for setup_id in setups["id"].values:
     if int(setup_id) < 10000:
         cp_name = params
         checkpoints_path = "/".join(cp_name.split("/")[:-1])
-    local_args = params_from_args(params, args)
+    local_args, supervised = params_from_args(params, args)
     conv_filters = [int(num) for num in local_args.conv_filters.split("-")]
 
     if not hasattr(local_args, "ico_order"):
@@ -314,6 +303,9 @@ for setup_id in setups["id"].values:
         activation=local_args.activation, batch_norm=local_args.batch_norm,
         conv_mode="DiNe",
         cachedir=os.path.join(args.outdir, "cached_ico_infos"))
+    
+    print("Number of trainable parameters : ",
+        sum(p.numel() for p in encoder.parameters() if p.requires_grad))
     
     on_the_fly_transform = None
 
@@ -371,14 +363,14 @@ for setup_id in setups["id"].values:
 
     epochs = []
     is_finished = False
-    print(checkpoints_path)
     for file in tqdm(os.listdir(checkpoints_path)):
         full_path = os.path.join(checkpoints_path, file)
         if not (os.path.isfile(full_path) and file.endswith("pth")
-                and "model" in file):
+                and "model_" in file):
             continue
         checkpoint = torch.load(full_path)
-        checkpoint = encoder_cp_from_model_cp(checkpoint)
+        encoder_prefix = "backbone" if not supervised else "0"
+        checkpoint = encoder_cp_from_model_cp(checkpoint, encoder_prefix)
         epoch = int(file.split(".pth")[0].split("_")[-1])
         if epoch == local_args.epochs:
             is_finished = True

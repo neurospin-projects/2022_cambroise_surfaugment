@@ -21,7 +21,7 @@ from surfify.utils import (setup_logging, icosahedron, downsample_data,
 
 from multimodaldatasets.datasets import DataManager
 from augmentations import Normalize, Reshape, Transformer
-from utils import params_from_args
+from utils import params_from_args, encoder_cp_from_model_cp
 
 
 # Get user parameters
@@ -66,13 +66,6 @@ n_features = len(metrics)
 transform = None
 batch_size = 64
 
-
-def encoder_cp_from_model_cp(checkpoint):
-    name_to_check = "backbone"
-    checkpoint = {".".join(key.split(".")[1:]): value 
-                for key, value in checkpoint["model_state_dict"].items() if name_to_check in key}
-    return checkpoint
-
 def matching_args_to_case(args, cases):
     relation_mapper = {
         "gt": lambda x, y: x > y,
@@ -88,7 +81,8 @@ def matching_args_to_case(args, cases):
         for arg_name, value in case_args.items():
             if not type(value) is list:
                 value = ["eq", value]
-            if not relation_mapper[value[0]](getattr(args, arg_name), value[1]):
+            if (getattr(args, arg_name, None) is None or not
+                relation_mapper[value[0]](getattr(args, arg_name), value[1])):
                 matches = False
         if matches:
             return case
@@ -118,30 +112,31 @@ else:
     regressor_params = [0.01, 0.1, 1, 10, 100]
     def cases(latent_dim=128, batch_size=1024):
         cases = dict(
-            a={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": True,
+            simCLR_base={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": True,
             "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
-            b={"algo": "simCLR", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
+            simCLR_hemi={"algo": "simCLR", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
             "blur": True, "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
-            c={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
+            simCLR_group={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
             "blur": True, "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
-            d={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": False,
+            simCLR_cutout={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": False,
             "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
-            e={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": False, "blur": True,
+            simCLR_blur={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": False, "blur": True,
             "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
-            f={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": False, "blur": False,
+            simCLR_noise={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": False, "blur": False,
             "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
-            g={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": True,
+            barlow_base={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": True,
             "noise": True, "latent_dim": latent_dim, "batch_size": batch_size},
-            h={"algo": "barlow", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
+            barlow_hemi={"algo": "barlow", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
             "blur": True, "noise": True, "latent_dim": latent_dim, "batch_size": batch_size},
-            i={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
+            barlow_group={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
             "blur": True, "noise": True, "latent_dim": latent_dim, "batch_size": batch_size},
-            j={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": False,
+            barlow_cutout={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": False,
             "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
-            k={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": 0, "cutout": False, "blur": True,
+            barlow_blur={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": 0, "cutout": False, "blur": True,
             "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
-            l={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": 0, "cutout": False, "blur": False,
-            "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},)
+            barlow_noise={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": 0, "cutout": False, "blur": False,
+            "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
+            supervised={"supervised": True})
         return cases
     cases = cases(128, 1024)
     best_cp_per_case = dict()
@@ -155,7 +150,7 @@ else:
         same_params_setups = setups[setups["args"] == params]
         if len(same_params_setups) > 1:
             compute_stds = True
-        local_args = params_from_args(params, args)
+        local_args, supervised = params_from_args(params, args)
         if not hasattr(local_args, "algo"):
             local_args.algo = "barlow"
         if not hasattr(local_args, "sigma"):
@@ -164,6 +159,8 @@ else:
             local_args.noise = False
         if not hasattr(local_args, "projector"):
             local_args.projector = "256-512-512" if local_args.algo == "barlow" else "256-128"
+        if supervised:
+            local_args.supervised = True
         case = matching_args_to_case(local_args, cases)
         if case is not None and epoch > 0 and local_args.ico_order == 5:
             if compute_stds:
@@ -208,7 +205,8 @@ else:
                         "checkpoints", str(_setup_id),
                         f"model_epoch_{best_epoch}.pth")
                     checkpoint = torch.load(cp_path)
-                    checkpoint = encoder_cp_from_model_cp(checkpoint)
+                    encoder_prefix = "0" if supervised else "backbone"
+                    checkpoint = encoder_cp_from_model_cp(checkpoint, encoder_prefix)
                     checkpoints.append(checkpoint)
                 if case not in best_cp_per_case.keys():
                     best_cp_per_case[case] = (
@@ -231,7 +229,8 @@ else:
                     pretrained_path = pretrained_path.replace(
                         "encoder.pth", "model_epoch_{}.pth".format(int(epoch)))
                 checkpoint = torch.load(pretrained_path)
-                checkpoint = encoder_cp_from_model_cp(checkpoint)
+                encoder_prefix = "0" if supervised else "backbone"
+                checkpoint = encoder_cp_from_model_cp(checkpoint, encoder_prefix)
                 
                 if case not in best_cp_per_case.keys():
                     best_cp_per_case[case] = (
@@ -426,7 +425,7 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
         list(evaluation_metrics) + list(evaluation_against_real_metric))}
     for setup_idx, _setup_id in enumerate(setup_id):
         params = setups[setups["id"] == _setup_id]["args"].values[0]
-        local_args = params_from_args(params, args)
+        local_args, supervised = params_from_args(params, args)
         best_params["regression"]["alpha"] = best_regressor_params[case_id] 
 
         conv_filters = [int(num) for num in local_args.conv_filters.split("-")]
@@ -568,9 +567,9 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
                 args.data, args.to_predict, args.method, setup_id,
                 None if args.pretrained_setup != "None" else list(cases)[case_id])
 
-        resdir = os.path.join(resdir, run_name)
-        if not os.path.isdir(resdir):
-            os.makedirs(resdir)
+        case_resdir = os.path.join(resdir, run_name)
+        if not os.path.isdir(case_resdir):
+            os.makedirs(case_resdir)
 
         valid_loaders = []
         if validation is None:
