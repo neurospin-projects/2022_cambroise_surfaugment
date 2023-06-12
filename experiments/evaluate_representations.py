@@ -283,11 +283,12 @@ if args.data in ["hbn", "euaims"]:
 test_size = "defaults"
 stratify = ["sex", "age", "site"]
 validation = None
-if args.data not in ["openbhb", "privatebhb"]:
-    test_size = 0.2
-    validation = 5
-    if args.to_predict == "asd":
-        stratify.append("asd")
+if args.data != "openbhb":
+    if not (args.to_predict == "age" and args.data == "privatebhb"):
+        test_size = 0.2
+        validation = 5
+        if args.to_predict == "asd":
+            stratify.append("asd")
 
 
 dataset = DataManager(
@@ -342,7 +343,7 @@ for fold_idx, loader in enumerate(loaders):
             path_to_scaler = os.path.join(
                 args.datadir, f"{modality}_scaler{suffix}.save")
             if (not os.path.exists(path_to_scaler) and
-                not args.data == "privatebhb"):
+                not (args.to_predict == "age" and args.data == "privatebhb")):
                 X[modality] += data[modality].view(
                     (len(data[modality]), -1)).tolist()
     for modality in modalities:
@@ -352,7 +353,7 @@ for fold_idx, loader in enumerate(loaders):
         path_to_scaler = os.path.join(
             args.datadir, f"{modality}_scaler{suffix}.save")
         if (not os.path.exists(path_to_scaler) and
-            not args.data == "privatebhb"):
+            not (args.to_predict == "age" and args.data == "privatebhb")):
             print("Fit scaler")
             scaler = StandardScaler()
             scaler.fit(X[modality])
@@ -451,7 +452,7 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
             scalers = {mod: None for mod in modalities}
             for modality in modalities:
                 datadir = args.datadir
-                if args.data == "privatebhb":
+                if (args.to_predict == "age" and args.data == "privatebhb"):
                     datadir = datadir.replace(args.data, local_args.data_train)
                 path_to_scaler = os.path.join(
                     datadir, f"{modality}_scaler.save")
@@ -528,7 +529,7 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
                 on_the_fly_transform["train"][-1][modality] = transformer
                 on_the_fly_transform["test"][modality] = transformer
         
-        if args.data == "privatebhb":
+        if (args.to_predict == "age" and args.data == "privatebhb"):
             train_datadir = args.datadir.replace(args.data, local_args.data_train)
             dataset = DataManager(
                 dataset=local_args.data_train, datasetdir=train_datadir,

@@ -359,7 +359,7 @@ for modality in modalities:
         ico = backbone.ico[args.ico_order]
         trf = SurfBlur(
             ico.vertices, ico.triangles,
-            sigma=interval((0.1, 2), float),
+            sigma=interval((0.1, 1), float),
             cachedir=os.path.join(args.outdir, "cached_ico_infos"))
         if args.algo == "barlow":
             transformer.register(trf, pipeline="hard")
