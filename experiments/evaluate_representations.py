@@ -107,7 +107,7 @@ if args.pretrained_setup != "None":
     checkpoints = [checkpoint]
     setup_ids = [int(args.pretrained_setup)]
 else:
-    validation_metric = "r2" if args.method == "regression" else "auc"
+    validation_metric = "mae" if args.method == "regression" else "auc"
     best_is_low = validation_metric == "mae"
     regressor_params = [0.01, 0.1, 1, 10, 100]
     def cases(latent_dim=128, batch_size=1024):
