@@ -108,7 +108,7 @@ if args.pretrained_setup != "None":
     setup_ids = [int(args.pretrained_setup)]
 else:
     validation_metric = "r2" if args.method == "regression" else "auc"
-    best_is_low = args.method == "regression"
+    best_is_low = validation_metric in == "mae"
     regressor_params = [0.01, 0.1, 1, 10, 100]
     def cases(latent_dim=128, batch_size=1024):
         cases = dict(
