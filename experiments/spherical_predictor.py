@@ -491,16 +491,16 @@ else:
         out_to_real_pred_func.append(
             lambda x : x.round().cpu().detach().numpy())
         if any([type(value) is np.str_ for value in label_values]):
-            label_prepro[idx] = OrdinalEncoder()
-            label_prepro[idx].fit(all_label_data[idx][:, np.newaxis])
-            print(label_prepro[idx].categories_)
-            out_to_real_pred_func[idx] = lambda x : label_prepro[idx].inverse_transform(
+            preprocessor = OrdinalEncoder()
+            preprocessor.fit(all_label_data[idx][:, np.newaxis])
+            out_to_real_pred_func[idx] = lambda x : preprocessor.inverse_transform(
                 x.argmax(1).cpu().detach().unsqueeze(1).numpy()).squeeze()
         if output_dim > n_bins:
-            label_prepro[idx] = KBinsDiscretizer(n_bins=n_bins, encode="ordinal")
-            label_prepro[idx].fit(all_label_data[idx][:, np.newaxis])
+            preprocessor = KBinsDiscretizer(n_bins=n_bins, encode="ordinal")
+            preprocessor.fit(all_label_data[idx][:, np.newaxis])
             print(label_prepro[idx].bin_edges_)
             output_dim = n_bins
+        label_prepro[idx] = preprocessor
     weight = None
     weight_pos = None
     if args.weight_criterion:
