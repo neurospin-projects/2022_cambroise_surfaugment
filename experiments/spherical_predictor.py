@@ -144,12 +144,11 @@ params = ("predict_{}_with_{}_on_{}_surf_order_{}_with_{}_features_fusion_{}_act
 run_id = int(time.time())
 setup_logging(level="info", logfile=None)
 checkpoint_dir = os.path.join(args.outdir, "predict_{}".format(args.to_predict))
-checkpoint_dir = os.path.join(checkpoint_dir, str(run_id))
+checkpoint_dir = os.path.join(checkpoint_dir, "checkpoints", str(run_id))
 if not os.path.isdir(checkpoint_dir):
     os.makedirs(checkpoint_dir)
 with open(os.path.join(checkpoint_dir, "params.json"), "w") as file:
     json.dump(vars(args), file)
-checkpoint_dir = os.path.join(checkpoint_dir, "checkpoints")
 if not os.path.isdir(checkpoint_dir):
     os.makedirs(checkpoint_dir)
 stats_file = open(os.path.join(checkpoint_dir, "stats.txt"), "a", buffering=1)
@@ -165,41 +164,41 @@ def same_params_but_epochs(args_str):
     return (params == args_str.replace(
         f"{epochs}_epochs", f"{args.epochs}_epochs"))
 
-if args.start_epoch > 1:
-    old_run_id = setups.loc[setups.args == params, "id"]
-    other_run_id = setups.loc[setups.args.apply(same_params_but_epochs), "id"]
-    if len(old_run_id) == 0 and len(other_run_id) > 0:
-        other_run_id = other_run_id.values[0]
-        print(other_run_id)
-        old_path = os.path.join(checkpoint_dir, str(other_run_id))
-        new_path = os.path.join(checkpoint_dir, str(run_id))
-        os.makedirs(new_path)
-        for file_name in os.listdir(old_path):
-            old_file = os.path.join(old_path, file_name)
-            new_file = os.path.join(new_path, file_name)
-            if os.path.isfile(old_file):
-                shutil.copy(old_file, new_file)
-    else:
-        if len(old_run_id) > 1 and args.run_id == -1:
-            raise ValueError("Parameters are ambiguous. You should provide a "
-                             "run id to know what training to resume.")
-        elif args.run_id != -1:
-            run_id = args.run_id
-        else:
-            run_id = old_run_id.item()
+# if args.start_epoch > 1:
+#     old_run_id = setups.loc[setups.args == params, "id"]
+#     other_run_id = setups.loc[setups.args.apply(same_params_but_epochs), "id"]
+#     if len(old_run_id) == 0 and len(other_run_id) > 0:
+#         other_run_id = other_run_id.values[0]
+#         print(other_run_id)
+#         old_path = os.path.join(checkpoint_dir, str(other_run_id))
+#         new_path = os.path.join(checkpoint_dir, str(run_id))
+#         os.makedirs(new_path)
+#         for file_name in os.listdir(old_path):
+#             old_file = os.path.join(old_path, file_name)
+#             new_file = os.path.join(new_path, file_name)
+#             if os.path.isfile(old_file):
+#                 shutil.copy(old_file, new_file)
+#     else:
+#         if len(old_run_id) > 1 and args.run_id == -1:
+#             raise ValueError("Parameters are ambiguous. You should provide a "
+#                              "run id to know what training to resume.")
+#         elif args.run_id != -1:
+#             run_id = args.run_id
+#         else:
+#             run_id = old_run_id.item()
             
-else:
-    setups = pd.concat([
-        setups,
-        pd.DataFrame({
-            "id": [run_id],
-            "args": [params],
-            "best_epoch": [0],
-            "best_param": [1],
-            "best_value": [1000]})],
-        ignore_index=True)
-    setups.to_csv(os.path.join(args.outdir, "predict_{}".format(args.to_predict), "setups.tsv"),
-        index=False, sep="\t")
+# else:
+setups = pd.concat([
+    setups,
+    pd.DataFrame({
+        "id": [run_id],
+        "args": [params],
+        "best_epoch": [0],
+        "best_param": [1],
+        "best_value": [1000]})],
+    ignore_index=True)
+setups.to_csv(os.path.join(args.outdir, "predict_{}".format(args.to_predict), "setups.tsv"),
+    index=False, sep="\t")
 print(run_id)
 
 # Load the input cortical data
