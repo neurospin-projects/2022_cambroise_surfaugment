@@ -168,7 +168,14 @@ if args.start_epoch > 1:
     old_run_id = setups.loc[setups.args == params, "id"]
     other_run_id = setups.loc[setups.args.apply(same_params_but_epochs), "id"]
     if len(old_run_id) == 0 and len(other_run_id) > 0:
-        other_run_id = other_run_id.values[0]
+        if len(other_run_id) > 1:
+            if args.run_id == -1:
+                raise ValueError("Parameters are ambiguous. You should provide a "
+                                "run id to know what training to resume.")
+            else:
+                other_run_id = args.run_id
+        else:
+            other_run_id = other_run_id.values[0]
         print(other_run_id)
         old_path = os.path.join(checkpoint_dir, str(other_run_id))
         new_path = os.path.join(checkpoint_dir, str(run_id))
