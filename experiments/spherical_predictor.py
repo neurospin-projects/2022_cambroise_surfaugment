@@ -383,9 +383,13 @@ if args.data == "openbhb":
 
 valid_loaders = []
 if validation is None:
-    train_loaders = [torch.utils.data.DataLoader(
-        dataset["train"], batch_size=args.batch_size, num_workers=6,
-        pin_memory=True, shuffle=True)] * 2
+    train_loaders = [
+        torch.utils.data.DataLoader(
+            dataset["train"], batch_size=args.batch_size, num_workers=6,
+            pin_memory=True, shuffle=True),
+        torch.utils.data.DataLoader(
+            dataset["train"], batch_size=args.batch_size, num_workers=6,
+            pin_memory=True, shuffle=True)]
     valid_loaders.append(torch.utils.data.DataLoader(
         dataset["test"]["valid"], batch_size=args.batch_size, num_workers=6,
         pin_memory=True, shuffle=True))
@@ -788,8 +792,6 @@ for fold, (train_loader, test_loader) in enumerate(
                 # print(y_hat)
                 # print(new_y)
                 preds = out_to_pred_func(y_hat)
-                print(fold)
-                print(len(out_to_real_pred_func))
                 real_preds = out_to_real_pred_func[fold](y_hat)
                     # print(preds.shape)
                     # print(real_preds.shape)
