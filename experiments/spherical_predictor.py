@@ -788,6 +788,8 @@ for fold, (train_loader, test_loader) in enumerate(
                 # print(y_hat)
                 # print(new_y)
                 preds = out_to_pred_func(y_hat)
+                print(fold)
+                print(len(out_to_real_pred_func))
                 real_preds = out_to_real_pred_func[fold](y_hat)
                     # print(preds.shape)
                     # print(real_preds.shape)
