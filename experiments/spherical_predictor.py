@@ -149,8 +149,6 @@ if not os.path.isdir(checkpoint_dir):
     os.makedirs(checkpoint_dir)
 with open(os.path.join(checkpoint_dir, "params.json"), "w") as file:
     json.dump(vars(args), file)
-if not os.path.isdir(checkpoint_dir):
-    os.makedirs(checkpoint_dir)
 stats_file = open(os.path.join(checkpoint_dir, "stats.txt"), "a", buffering=1)
 print(" ".join(sys.argv))
 print(" ".join(sys.argv), file=stats_file)
@@ -984,13 +982,13 @@ for metric in all_metrics.keys():#["real_mae", "real_rmse", "r2", "correlation"]
     best_values_per_metric[metric] = best_values.tolist()
     best_stds_per_metric[metric] = std_metrics[metric][best_epochs].tolist()
 
-with open(os.path.join(checkpoint_dir, "..", 'best_values.json'), 'w') as fp:
+with open(os.path.join(checkpoint_dir, 'best_values.json'), 'w') as fp:
     json.dump(best_values_per_metric, fp)
 
-with open(os.path.join(checkpoint_dir, "..", 'best_epochs.json'), 'w') as fp:
+with open(os.path.join(checkpoint_dir, 'best_epochs.json'), 'w') as fp:
     json.dump(best_epochs_per_metric, fp)
 
-with open(os.path.join(checkpoint_dir, "..", 'best_stds.json'), 'w') as fp:
+with open(os.path.join(checkpoint_dir, 'best_stds.json'), 'w') as fp:
     json.dump(best_stds_per_metric, fp)
 
 final_value_per_metric = {}
@@ -1002,13 +1000,13 @@ for metric in all_metrics.keys():
     final_valid_std_per_metric[metric] = std_metrics[metric][best_epochs_per_metric[metric][0]]
 
 print(final_value_per_metric)
-with open(os.path.join(checkpoint_dir, "..", 'final_values.json'), 'w') as fp:
+with open(os.path.join(checkpoint_dir, 'final_values.json'), 'w') as fp:
     json.dump(final_value_per_metric, fp)
 
-with open(os.path.join(checkpoint_dir, "..", 'final_valid_stds.json'), 'w') as fp:
+with open(os.path.join(checkpoint_dir, 'final_valid_stds.json'), 'w') as fp:
     json.dump(final_valid_std_per_metric, fp)
 
-with open(os.path.join(checkpoint_dir, "..", 'final_valid_values.json'), 'w') as fp:
+with open(os.path.join(checkpoint_dir, 'final_valid_values.json'), 'w') as fp:
     json.dump(final_valid_value_per_metric, fp)
 
 # checkpoint = torch.load(checkpoint_file)
