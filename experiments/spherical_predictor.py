@@ -515,8 +515,6 @@ else:
     criterion = nn.CrossEntropyLoss(weight=weight)
     evaluation_against_real_metric = {}
     out_to_pred_func = lambda x: x.argmax(1).cpu().detach().numpy()
-    print(out_to_real_pred_func)
-    print(label_prepro)
     # out_to_pred_func = lambda x: nn.functional.sigmoid(x).round().cpu().detach().numpy()
 
 

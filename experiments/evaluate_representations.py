@@ -177,9 +177,11 @@ else:
                         continue
                     with open(validation_metrics_path, "r") as f:
                         validation_metrics = json.load(f)
+                    print(validation_metrics)
                     for param_idx, _ in enumerate(regressor_params):
                         for epoch_idx, epoch in enumerate(validation_metrics["epochs"]):
                             nth_cp = int(epoch / 10) - 1
+                            print(param_idx, epoch, epoch_idx)
                             metric_per_epoch_per_param[param_idx][
                                 nth_cp].append(validation_metrics[
                                     validation_metric][param_idx][epoch_idx])
