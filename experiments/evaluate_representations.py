@@ -151,7 +151,9 @@ else:
         same_params_setups = setups[setups["args"] == params]
         if len(same_params_setups) > 1:
             compute_stds = True
+        to_predict = args.to_predict
         local_args, supervised = params_from_args(params, args)
+        args.to_predict = to_predict
         if not hasattr(local_args, "algo"):
             local_args.algo = "barlow"
         if not hasattr(local_args, "sigma"):
@@ -177,11 +179,9 @@ else:
                         continue
                     with open(validation_metrics_path, "r") as f:
                         validation_metrics = json.load(f)
-                    print(validation_metrics)
                     for param_idx, _ in enumerate(regressor_params):
                         for epoch_idx, epoch in enumerate(validation_metrics["epochs"]):
                             nth_cp = int(epoch / 10) - 1
-                            print(param_idx, epoch, epoch_idx)
                             metric_per_epoch_per_param[param_idx][
                                 nth_cp].append(validation_metrics[
                                     validation_metric][param_idx][epoch_idx])
