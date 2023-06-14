@@ -155,7 +155,6 @@ print(" ".join(sys.argv), file=stats_file)
 
 setups = pd.read_table(
     os.path.join(args.outdir, "predict_{}".format(args.to_predict), "setups.tsv"))
-run_id = int(time.time())
 
 def same_params_but_epochs(args_str):
     epochs = args_str.split("_epochs")[0].split("_")[-1]
