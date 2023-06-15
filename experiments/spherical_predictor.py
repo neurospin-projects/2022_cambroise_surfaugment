@@ -127,6 +127,7 @@ n_features = len(metrics)
 activation = "ReLU"
 if args.method == "classification":
     args.loss = "ce"
+args.conv_filters = [int(item) for item in args.conv_filters.split("-")]
 
 params = ("predict_{}_with_{}_on_{}_surf_order_{}_with_{}_features_fusion_{}_act_{}"
     "_bn_{}_conv_{}_latent_{}_wd_{}_{}_epochs_lr_{}_reduced_{}_bs_{}"
@@ -242,8 +243,7 @@ if args.pretrained_setup != "None":
     checkpoint = torch.load(pretrained_path)
     checkpoint = encoder_cp_from_barlow_cp(checkpoint)
 
-args.conv_filters = [int(item) for item in args.conv_filters.split("-")]
-args.batch_size = 256
+
 
 input_shape = (len(metrics), len(ico_verts))
 
