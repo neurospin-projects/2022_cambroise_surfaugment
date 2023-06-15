@@ -19,13 +19,11 @@ def params_from_args(params, args):
     format_from_predict = ("predict_{}_with_{}_on_{}_surf_order_{}_with_{}_"
         "features_fusion_{}_act_{}_bn_{}_conv_{}_latent_{}_wd_{}_{}_epochs_"
         "lr_{}_reduced_{}_bs_{}_normalize_{}_standardize_{}_loss_{}_weighted"
-        "_{}_mixup_{} _momentum_{}_fut_{}_pretrained_setup_{}_epoch_{}_dr_{}_"
+        "_{}_mixup_{}_momentum_{}_fut_{}_pretrained_setup_{}_epoch_{}_dr_{}_"
         "nlp_{}")
     old = True
     new = True
     if params.startswith("predict"):
-        print("here")
-        print(params)
         args_names = ["to_predict", "method", "data_train", "ico_order",
             "n_features", "fusion_level", "activation", "batch_norm",
             "conv_filters", "latent_dim", "weight_decay", "epochs",
