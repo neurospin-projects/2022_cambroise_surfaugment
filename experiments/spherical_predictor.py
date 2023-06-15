@@ -713,7 +713,6 @@ for fold, (train_loader, test_loader) in enumerate(
         # print(model)
     print("Number of trainable parameters : ",
         sum(p.numel() for p in model.parameters() if p.requires_grad))
-    print(list(p.shape for p in model.parameters() if p.requires_grad))
 
     optimizer = optim.Adam(model.parameters(), args.learning_rate,
                         weight_decay=args.weight_decay)
@@ -784,16 +783,9 @@ for fold, (train_loader, test_loader) in enumerate(
                     loss = mixup_criterion(criterion, y_hat, y_a, y_b, mixup_lambda)
                 else:
                     loss = criterion(y_hat, new_y)
-                # print(y_hat.shape)
-                # print(new_y.shape)
-                # print(y_hat)
-                # print(new_y)
+
                 preds = out_to_pred_func(y_hat)
                 real_preds = out_to_real_pred_func[fold](y_hat)
-                    # print(preds.shape)
-                    # print(real_preds.shape)
-                    # print(preds)
-                    # print(real_preds)
 
                 # loss.backward()
                 # optimizer.step()
@@ -874,11 +866,11 @@ for fold, (train_loader, test_loader) in enumerate(
         if use_board:
             board.update_plot("validation loss", epoch, stats["validation_loss"])
         for name in evaluation_metrics.keys():
-            all_metrics[name][epoch].append(stats["validation_" + name])
+            all_metrics[name][epoch - 1].append(stats["validation_" + name])
             if use_board:
                 board.update_plot("validation " + name, epoch, stats["validation_" + name])
         for name in evaluation_against_real_metric.keys():
-            all_metrics[name][epoch].append(stats["validation_" + name])
+            all_metrics[name][epoch - 1].append(stats["validation_" + name])
             if use_board:
                 board.update_plot("validation " + name, epoch, stats["validation_" + name])
         if epoch % args.save_freq == 0 and fold == len(train_loaders) - 1:
