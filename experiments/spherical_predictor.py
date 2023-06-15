@@ -735,10 +735,10 @@ for fold, (train_loader, test_loader) in enumerate(
     if args.epochs > 0 and use_board:
         board = Board(env=str(run_id))
     # linear_model = LogisticRegression()
-    start_epoch = 0
+    start_epoch = 1
     start_time = time.time()
     scaler = torch.cuda.amp.GradScaler()
-    for epoch in range(start_epoch, args.epochs):
+    for epoch in range(start_epoch, args.epochs + 1):
         stats = dict(epoch=epoch, lr=optimizer.param_groups[0]["lr"],
                     loss=0, validation_loss=0, validation_mse=0,
                     total_train_val_time=0, average_train_epoch_duration=0,
