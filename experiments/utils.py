@@ -24,6 +24,8 @@ def params_from_args(params, args):
     old = True
     new = True
     if params.startswith("predict"):
+        print("here")
+        print(params)
         args_names = ["to_predict", "method", "data_train", "ico_order",
             "n_features", "fusion_level", "activation", "batch_norm",
             "conv_filters", "latent_dim", "weight_decay", "epochs",
