@@ -295,7 +295,7 @@ if args.data not in ["openbhb", "privatebhb"]:
 dataset = DataManager(
     dataset=args.data, datasetdir=args.datadir, modalities=all_modalities,
     stratify=stratify, discretize=["age"], transform=transform,
-    overwrite=True, test_size=test_size, validation=validation,
+    overwrite=False, test_size=test_size, validation=validation,
     **kwargs)
 
 params_for_validation = {
