@@ -240,7 +240,7 @@ else:
                         [setup_id], [checkpoint], best_value, best_param)
                 if ((best_cp_per_case[case][2] > best_value and best_is_low)
                     or (best_cp_per_case[case][2] < best_value and
-                        not best_is_low) and len(best_cp_per_case[case][0]) <= 1):
+                        not best_is_low)) and len(best_cp_per_case[case][0]) <= 1:
                     best_cp_per_case[case] = (
                         [setup_id], [checkpoint], best_value, best_param)
     checkpoints = [best_cp_per_case[case][1] for case in cases.keys()
