@@ -74,6 +74,11 @@ def transform(x):
     downsampled_data = downsample_data(x, 7 - ico_order, down_indices)
     return np.swapaxes(downsampled_data, 1, 2)
 
+transform = {
+    "surface-rh": transform,
+    "surface-lh": transform,
+}
+
 
 kwargs = {
     "surface-rh": {"metrics": metrics},
@@ -86,12 +91,6 @@ if args.data in ["hbn", "euaims"]:
     if args.to_predict not in ["sex", "age", "site", "asd"]:
         all_modalities.append("clinical")
         kwargs["clinical"] = dict(cols=[args.to_predict])
-
-if "clinical" in all_modalities:
-    clinical_names = np.load(
-        os.path.join(args.datadir, "clinical_names.npy"),allow_pickle=True)
-    if args.to_predict in clinical_names:
-        index_to_predict = clinical_names.tolist().index(args.to_predict)
 
 # evaluation_metrics = (
 #     {"mae": mean_absolute_error, "r2": r2_score} if args.method == "regression"
@@ -138,8 +137,7 @@ if "clinical" in all_modalities:
 test_size = "defaults"
 stratify = ["sex", "age", "site"]
 validation = None
-if (args.data != "openbhb" and not
-    (args.to_predict == "age" and args.data == "privatebhb")):
+if args.data not in ["openbhb", "privatebhb"]:
     test_size = 0.2
     validation = 5
     if args.to_predict == "asd":
@@ -150,6 +148,12 @@ dataset = DataManager(
     stratify=stratify, discretize=["age"], transform=transform,
     overwrite=False, test_size=test_size, validation=validation,
     **kwargs)
+
+if "clinical" in all_modalities:
+    clinical_names = np.load(
+        os.path.join(args.datadir, "clinical_names.npy"), allow_pickle=True)
+    if args.to_predict in clinical_names:
+        index_to_predict = clinical_names.tolist().index(args.to_predict)
 
 params_for_validation = {
     "regression": {"alpha": [0.01, 0.1, 1, 10, 100]},
@@ -192,7 +196,7 @@ for fold_idx, loader in enumerate(loaders):
             path_to_scaler = os.path.join(
                 args.datadir, f"{modality}_scaler{suffix}.save")
             if (not os.path.exists(path_to_scaler) and
-                not (args.to_predict == "age" and args.data == "privatebhb")):
+                not args.data == "privatebhb"):
                 X[modality] += data[modality].view(
                     (len(data[modality]), -1)).tolist()
     for modality in modalities:
@@ -202,7 +206,7 @@ for fold_idx, loader in enumerate(loaders):
         path_to_scaler = os.path.join(
             args.datadir, f"{modality}_scaler{suffix}.save")
         if (not os.path.exists(path_to_scaler) and
-            not (args.to_predict == "age" and args.data == "privatebhb")):
+            not args.data == "privatebhb"):
             print("Fit scaler")
             scaler = StandardScaler()
             scaler.fit(X[modality])
@@ -269,6 +273,7 @@ else:
 best_is_low = (args.method == "regression" and
                validation_metric in ["mae", "mse"])
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 for setup_id in setups["id"].values:
     params = setups[setups["id"] == setup_id]["args"].values[0]
@@ -296,7 +301,8 @@ for setup_id in setups["id"].values:
     # print(last_checkpoint)
     if (local_args.ico_order != 5 or os.path.exists(path_to_metrics)
         or not os.path.exists(checkpoints_path)
-        or not os.path.exists(last_checkpoint)):
+        or not os.path.exists(last_checkpoint)
+        or local_args.loss_param != 2):
         continue
 
     encoder = SphericalHemiFusionEncoder(
@@ -370,7 +376,7 @@ for setup_id in setups["id"].values:
         if not (os.path.isfile(full_path) and file.endswith("pth")
                 and "model_" in file):
             continue
-        checkpoint = torch.load(full_path)
+        checkpoint = torch.load(full_path, map_location=device)
         encoder_prefix = "backbone" if not supervised else "0"
         checkpoint = encoder_cp_from_model_cp(checkpoint, encoder_prefix)
         epoch = int(file.split(".pth")[0].split("_")[-1])
@@ -395,9 +401,9 @@ for setup_id in setups["id"].values:
                 np.array(y)[:, np.newaxis]).squeeze()
             transformed_ys.append(transformed_y)
             ys.append(y)
-            with torch.cuda.amp.autocast():
-                data = (left_x, right_x)
-                latents.append(model(data).squeeze().detach().cpu().numpy())
+            # with torch.cuda.amp.autocast():
+            data = (left_x, right_x)
+            latents.append(model(data).squeeze().detach().cpu().numpy())
         Y = np.concatenate(transformed_ys)
         real_Y = np.concatenate(ys)
         X = np.concatenate(latents)
@@ -417,9 +423,9 @@ for setup_id in setups["id"].values:
                 np.array(y)[:, np.newaxis]).squeeze()
             valid_transformed_ys.append(transformed_valid_y)
             valid_ys.append(y)
-            with torch.cuda.amp.autocast():
-                data = (left_x, right_x)
-                valid_latents.append(model(data).squeeze().detach().cpu().numpy())
+            # with torch.cuda.amp.autocast():
+            data = (left_x, right_x)
+            valid_latents.append(model(data).squeeze().detach().cpu().numpy())
 
         X_valid = np.concatenate(valid_latents)
         Y_valid = np.concatenate(valid_transformed_ys)

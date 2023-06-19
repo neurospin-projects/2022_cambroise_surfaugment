@@ -65,6 +65,7 @@ metrics = ["thickness", "curv", "sulc"]
 n_features = len(metrics)
 transform = None
 batch_size = 64
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def matching_args_to_case(args, cases):
     relation_mapper = {
@@ -102,7 +103,7 @@ if args.pretrained_setup != "None":
             "encoder.pth", "model_epoch_{}.pth".format(int(epoch)))
     args = params_from_args(params, args)
     
-    checkpoint = torch.load(pretrained_path)
+    checkpoint = torch.load(pretrained_path, map_location=device)
     checkpoint = encoder_cp_from_model_cp(checkpoint)
     checkpoints = [checkpoint]
     setup_ids = [int(args.pretrained_setup)]
@@ -213,13 +214,13 @@ else:
                         "/".join(args.setups_file.split("/")[:-1]),
                         "checkpoints", str(_setup_id),
                         f"model_epoch_{best_epoch}.pth")
-                    checkpoint = torch.load(cp_path)
+                    checkpoint = torch.load(cp_path, map_location=device)
                     encoder_prefix = "0" if supervised else "backbone"
                     checkpoint = encoder_cp_from_model_cp(checkpoint, encoder_prefix)
                     checkpoints.append(checkpoint)
                 if case not in best_cp_per_case.keys():
                     best_cp_per_case[case] = (
-                        setup_ids, checkpoints, best_value, best_param)
+                        setup_ids, checkpoints, best_value, best_param, best_epoch)
                 if ((best_cp_per_case[case][2] > best_value and best_is_low
                      and len(best_cp_per_case[case][0]) <= len(setup_ids))
                     or (best_cp_per_case[case][2] < best_value and
@@ -227,7 +228,7 @@ else:
                         len(best_cp_per_case[case][0]) <= len(setup_ids))
                         or len(best_cp_per_case[case][0]) < len(setup_ids)):
                     best_cp_per_case[case] = (
-                        setup_ids, checkpoints, best_value, best_param)
+                        setup_ids, checkpoints, best_value, best_param, best_epoch)
             else:
                 pretrained_path = os.path.join(
                     "/".join(args.setups_file.split("/")[:-1]),
@@ -237,18 +238,18 @@ else:
                     pretrained_path = params
                     pretrained_path = pretrained_path.replace(
                         "encoder.pth", "model_epoch_{}.pth".format(int(epoch)))
-                checkpoint = torch.load(pretrained_path)
+                checkpoint = torch.load(pretrained_path, map_location=device)
                 encoder_prefix = "0" if supervised else "backbone"
                 checkpoint = encoder_cp_from_model_cp(checkpoint, encoder_prefix)
                 
                 if case not in best_cp_per_case.keys():
                     best_cp_per_case[case] = (
-                        [setup_id], [checkpoint], best_value, best_param)
+                        [setup_id], [checkpoint], best_value, best_param, epoch)
                 if ((best_cp_per_case[case][2] > best_value and best_is_low)
                     or (best_cp_per_case[case][2] < best_value and
                         not best_is_low)) and len(best_cp_per_case[case][0]) <= 1:
                     best_cp_per_case[case] = (
-                        [setup_id], [checkpoint], best_value, best_param)
+                        [setup_id], [checkpoint], best_value, best_param, epoch)
     checkpoints = [best_cp_per_case[case][1] for case in cases.keys()
                    if case in best_cp_per_case.keys()]
     setup_ids = [best_cp_per_case[case][0] for case in cases.keys()
@@ -259,7 +260,11 @@ else:
                    if case in best_cp_per_case.keys()]
     args.to_predict, args.method = to_predict, method
 
-print(setup_ids)
+# print(setup_ids)
+print("".join(f"{case} : {best_cp_per_case[case][0]}, best value "
+      f"{best_cp_per_case[case][2]} with {best_cp_per_case[case][3]} at "
+      f"epoch {best_cp_per_case[case][4]}.\n"
+      for case in best_cp_per_case.keys()))
 input_shape = (len(metrics), len(icosahedron(args.ico_order)[0]))
 
 order = 7
