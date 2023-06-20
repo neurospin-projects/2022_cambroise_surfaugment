@@ -157,9 +157,9 @@ print(" ".join(sys.argv), file=stats_file)
 setups_path = os.path.join(args.outdir, "predict_{}".format(args.to_predict), "setups.tsv")
 if not os.path.exists(setups_path):
     setups = pd.DataFrame({"id": [], "args": [], "best_epoch": [], "best_param": [], "best_value": []})
+    setups = setups.astype({"id": int})
 else:
     setups = pd.read_table(setups_path)
-print(setups)
 
 def same_params_but_epochs(args_str):
     epochs = args_str.split("_epochs")[0].split("_")[-1]

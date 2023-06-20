@@ -302,7 +302,7 @@ for setup_id in setups["id"].values:
     if (local_args.ico_order != 5 or os.path.exists(path_to_metrics)
         or not os.path.exists(checkpoints_path)
         or not os.path.exists(last_checkpoint)
-        or local_args.loss_param != 2):
+        or (hasattr(local_args, "loss_param") and local_args.loss_param != 2)):
         continue
 
     encoder = SphericalHemiFusionEncoder(
