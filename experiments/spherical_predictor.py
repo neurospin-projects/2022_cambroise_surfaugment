@@ -155,7 +155,7 @@ print(" ".join(sys.argv))
 print(" ".join(sys.argv), file=stats_file)
 
 setups_path = os.path.join(args.outdir, "predict_{}".format(args.to_predict), "setups.tsv")
-if os.path.exists(setups_path):
+if not os.path.exists(setups_path):
     setups = pd.DataFrame({"id": [], "args": [], "best_epoch": [], "best_param": [], "best_value": []})
 else:
     setups = pd.read_table(setups_path)
