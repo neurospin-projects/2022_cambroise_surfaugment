@@ -190,17 +190,17 @@ def same_params_but_epochs(args_str):
 #             run_id = old_run_id.item()
             
 # else:
-# setups = pd.concat([
-#     setups,
-#     pd.DataFrame({
-#         "id": [run_id],
-#         "args": [params],
-#         "best_epoch": [0],
-#         "best_param": [1],
-#         "best_value": [1000]})],
-#     ignore_index=True)
-# setups.to_csv(os.path.join(args.outdir, "predict_{}".format(args.to_predict), "setups.tsv"),
-#     index=False, sep="\t")
+setups = pd.concat([
+    setups,
+    pd.DataFrame({
+        "id": [run_id],
+        "args": [params],
+        "best_epoch": [0],
+        "best_param": [1],
+        "best_value": [1000]})],
+    ignore_index=True)
+setups.to_csv(os.path.join(args.outdir, "predict_{}".format(args.to_predict), "setups.tsv"),
+    index=False, sep="\t")
 print(run_id)
 
 # Load the input cortical data
