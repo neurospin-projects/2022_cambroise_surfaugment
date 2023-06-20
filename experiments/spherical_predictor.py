@@ -154,8 +154,12 @@ stats_file = open(os.path.join(checkpoint_dir, "stats.txt"), "a", buffering=1)
 print(" ".join(sys.argv))
 print(" ".join(sys.argv), file=stats_file)
 
-setups = pd.read_table(
-    os.path.join(args.outdir, "predict_{}".format(args.to_predict), "setups.tsv"))
+setups_path = os.path.join(args.outdir, "predict_{}".format(args.to_predict), "setups.tsv")
+if os.path.exists(setups_path):
+    setups = pd.DataFrame({"id": [], "args": [], "best_epoch": [], "best_param": [], "best_value": []})
+else:
+    setups = pd.read_table(setups_path)
+print(setups)
 
 def same_params_but_epochs(args_str):
     epochs = args_str.split("_epochs")[0].split("_")[-1]
@@ -186,17 +190,17 @@ def same_params_but_epochs(args_str):
 #             run_id = old_run_id.item()
             
 # else:
-setups = pd.concat([
-    setups,
-    pd.DataFrame({
-        "id": [run_id],
-        "args": [params],
-        "best_epoch": [0],
-        "best_param": [1],
-        "best_value": [1000]})],
-    ignore_index=True)
-setups.to_csv(os.path.join(args.outdir, "predict_{}".format(args.to_predict), "setups.tsv"),
-    index=False, sep="\t")
+# setups = pd.concat([
+#     setups,
+#     pd.DataFrame({
+#         "id": [run_id],
+#         "args": [params],
+#         "best_epoch": [0],
+#         "best_param": [1],
+#         "best_value": [1000]})],
+#     ignore_index=True)
+# setups.to_csv(os.path.join(args.outdir, "predict_{}".format(args.to_predict), "setups.tsv"),
+#     index=False, sep="\t")
 print(run_id)
 
 # Load the input cortical data
