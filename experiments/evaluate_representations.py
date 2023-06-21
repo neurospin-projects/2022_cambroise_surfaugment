@@ -115,9 +115,9 @@ else:
         cases = dict(
             simCLR_base={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": True,
             "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size, "epochs": 350},
-            simCLR_hemi={"algo": "simCLR", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
+            simCLR_base_hemi={"algo": "simCLR", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
             "blur": True, "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size, "epochs": 350},
-            simCLR_group={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
+            simCLR_base_group={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
             "blur": True, "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size, "epochs": 350},
             simCLR_cutout={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": False,
             "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
@@ -125,6 +125,10 @@ else:
             "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size, "epochs": 350},
             simCLR_noise={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": False, "blur": False,
             "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
+            simCLR_hemi={"algo": "simCLR", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": False,
+            "blur": False, "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size, "epochs": 350},
+            simCLR_group={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": False,
+            "blur": False, "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size, "epochs": 350}
             simCLR_new_base={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": False,
             "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
             simCLR_new_hemi={"algo": "simCLR", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
