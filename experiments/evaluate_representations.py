@@ -128,7 +128,7 @@ else:
             simCLR_hemi={"algo": "simCLR", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": False,
             "blur": False, "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size, "epochs": 350},
             simCLR_group={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": False,
-            "blur": False, "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size, "epochs": 350}
+            "blur": False, "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size, "epochs": 350},
             simCLR_new_base={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": False,
             "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
             simCLR_new_hemi={"algo": "simCLR", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
