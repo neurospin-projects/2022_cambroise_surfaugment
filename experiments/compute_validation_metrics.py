@@ -14,7 +14,8 @@ from sklearn.linear_model import Ridge, LogisticRegression
 from sklearn.metrics import (
     balanced_accuracy_score, r2_score, mean_squared_error,
     mean_absolute_error, roc_auc_score)
-from sklearn.preprocessing import StandardScaler, OrdinalEncoder
+from sklearn.preprocessing import (KBinsDiscretizer, StandardScaler,
+                                   OrdinalEncoder)
 
 from multimodaldatasets.datasets import DataManager
 from surfify.utils import icosahedron, downsample, downsample_data
@@ -260,16 +261,28 @@ else:
     evaluation_metrics = {#"accuracy": accuracy_score,
                           "bacc": balanced_accuracy_score,
                           "auc": roc_auc_score}
+    evaluation_against_real_metric = {}
+    validation_metric = "auc"
     tensor_type = "long"
     label_prepro = TransparentProcessor()
+    out_to_real_pred_func = lambda x : x.squeeze()
+    n_bins = 3
     if any([type(value) is np.str_ for value in label_values]):
         label_prepro = OrdinalEncoder()
         label_prepro.fit(all_label_data[:, np.newaxis])
         out_to_real_pred_func = lambda x : label_prepro.inverse_transform(
             x[:, np.newaxis]).squeeze()
-    evaluation_against_real_metric = {}
-    validation_metric = "auc"
-    regressor = LogisticRegression
+    elif output_dim > n_bins:
+        label_prepro = KBinsDiscretizer(n_bins=n_bins, encode="ordinal")
+        label_prepro.fit(all_label_data[:, np.newaxis])
+        print(label_prepro.bin_edges_)
+        validation_metric = "bacc"
+        evaluation_metrics = {"bacc": balanced_accuracy_score}
+        evaluation_against_real_metric = {
+            "mae": mean_absolute_error, "r2": r2_score,
+            "correlation": corr_metric}
+        out_to_real_pred_func = lambda x : label_prepro.inverse_transform(
+            x[:, np.newaxis]).squeeze()
 best_is_low = (args.method == "regression" and
                validation_metric in ["mae", "mse"])
 
