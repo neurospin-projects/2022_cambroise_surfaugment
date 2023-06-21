@@ -14,8 +14,8 @@ from sklearn.linear_model import Ridge, LogisticRegression
 from sklearn.metrics import (
     balanced_accuracy_score, r2_score, mean_squared_error,
     mean_absolute_error, roc_auc_score)
-from sklearn.preprocessing import (KBinsDiscretizer, StandardScaler,
-                                   OrdinalEncoder)
+from sklearn.preprocessing import (
+    KBinsDiscretizer, StandardScaler,OrdinalEncoder)
 
 from multimodaldatasets.datasets import DataManager
 from surfify.utils import icosahedron, downsample, downsample_data
@@ -258,11 +258,10 @@ if args.method == "regression":
     out_to_real_pred_func = lambda x: label_prepro.inverse_transform(x[:, np.newaxis]).squeeze()
 else:
     output_dim = len(label_values)
-    evaluation_metrics = {#"accuracy": accuracy_score,
-                          "bacc": balanced_accuracy_score,
+    evaluation_metrics = {"bacc": balanced_accuracy_score,
                           "auc": roc_auc_score}
     evaluation_against_real_metric = {}
-    validation_metric = "auc"
+    validation_metric = "bacc"
     tensor_type = "long"
     label_prepro = TransparentProcessor()
     out_to_real_pred_func = lambda x : x.squeeze()
@@ -276,13 +275,14 @@ else:
         label_prepro = KBinsDiscretizer(n_bins=n_bins, encode="ordinal")
         label_prepro.fit(all_label_data[:, np.newaxis])
         print(label_prepro.bin_edges_)
-        validation_metric = "bacc"
         evaluation_metrics = {"bacc": balanced_accuracy_score}
         evaluation_against_real_metric = {
             "mae": mean_absolute_error, "r2": r2_score,
             "correlation": corr_metric}
         out_to_real_pred_func = lambda x : label_prepro.inverse_transform(
             x[:, np.newaxis]).squeeze()
+    regressor = LogisticRegression
+
 best_is_low = (args.method == "regression" and
                validation_metric in ["mae", "mse"])
 
@@ -312,7 +312,7 @@ for setup_id in setups["id"].values:
     # print(os.path.exists(path_to_metrics))
     # print(checkpoints_path)
     # print(last_checkpoint)
-    if (local_args.ico_order != 5 #or os.path.exists(path_to_metrics)
+    if (local_args.ico_order != 5 or# os.path.exists(path_to_metrics)
         or not os.path.exists(checkpoints_path)
         or not os.path.exists(last_checkpoint)
         or (hasattr(local_args, "loss_param") and local_args.loss_param != 2)):
