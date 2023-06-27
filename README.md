@@ -81,21 +81,54 @@ cd experiments
 export DATASETDIR=/path/to/my/dataset
 export OUTDIR=/path/to/the/output/directory
 
-./experiments train --dataset hbn --datasetdir $DATASETDIR --outdir $OUTDIR
---latent_dim 20 --input_dims 7,444 --beta 1 --batch_size 256
---likelihood normal --initial_learning_rate 0.002 --n_epochs 550
---learn_output_scale --allow_missing_blocks
+# /!\ Long run /!\ Launch the training of a SimCLR-SCNN with Base
+# augmentations 
+python train_ssl.py --datasetdir $DATASETDIR --outdir $OUTDIR 
+--latent_dim 128 --batch_size 1024 --normalize --standardize 
+--cutout --blur --noise --learning-rate 2e-3 --epochs 400 
+--loss-param 2
 
-export RUN=my_run_id
+# /!\ Long run /!\ Launch the training of a SimCLR-SCNN with Base + HemiMixUp
+# augmentations 
+python train_ssl.py --datasetdir $DATASETDIR --outdir $OUTDIR 
+--latent_dim 128 --batch_size 1024 --normalize --standardize 
+--cutout --blur --noise --learning-rate 2e-3 --epochs 400 
+--loss-param 2 --hemimixup 0.3
 
-# /!\ Long run /!\
-./experiments daa --dataset hbn --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN --n_samples 150 --n_validation 20 --trust_level 0.7
-./experiments rse --dataset hbn --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
+# /!\ Long run /!\ Launch the training of a SimCLR-SCNN with Base + GroupMixUp
+# augmentations 
+python train_ssl.py --datasetdir $DATASETDIR --outdir $OUTDIR 
+--latent_dim 128 --batch_size 1024 --normalize --standardize 
+--cutout --blur --noise --learning-rate 2e-3 --epochs 400 
+--loss-param 2 --groupmixup 0.4
 
-./experiments daa-plot-most-connected --dataset hbn --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
-./experiments daa-plot-score-metric --dataset hbn --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN --score SRS_Total --metric thickness
-./experiments rsa-plot --dataset hbn --datasetdir $DATASETDIR --outdir $OUTDIR --run $RUN
-./experiments hist-plot --datasets hbn,euaims --datasetdirs $DATASETDIR1,$DATASETDIR2 --scores SRS_Total,t1_srs_rawscore --outdir $OUTDIR
+# /!\ Long run /!\ Launch the training of a Age-supervised SCNN
+python train_supervised.py --datasetdir $DATASETDIR --outdir $OUTDIR 
+--latent_dim 128 --batch_size 1024 --normalize --standardize 
+--learning-rate 5e-4 --epochs 100 --loss l1
+
+# /!\ Long run /!\ Launch the training of a Sex-supervised SCNN
+python train_supervised.py --datasetdir $DATASETDIR --outdir $OUTDIR 
+--latent_dim 128 --batch_size 1024 --normalize --standardize 
+--learning-rate 5e-4 --epochs 100 --to-predict sex --method classification
+
+# Compute validation metrics for each saved SimCLR-SCNNs version
+# for some prediction task (default age with regression)
+python compute_validation_metrics.py --datasetdir $DATASETDIR --outdir $OUTDIR 
+--setups-file ${OUTDIR}/pretrain/setups.tsv
+
+# Compute validation metrics for each saved SimCLR-SCNNs version
+# for sex prediction task with classification
+python compute_validation_metrics.py --datasetdir $DATASETDIR --outdir $OUTDIR 
+--setups-file ${OUTDIR}/pretrain/setups.tsv --to-predict sex 
+--method classification
+
+# Compute validation metrics for each saved Age-supervised SCNNs version
+# for age prediction task with regression
+python compute_validation_metrics.py --datasetdir $DATASETDIR --outdir $OUTDIR 
+--setups-file ${OUTDIR}/predict_age/setups.tsv
+
+
 ```
 
 Citation
