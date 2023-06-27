@@ -27,7 +27,7 @@ from utils import params_from_args, encoder_cp_from_model_cp
 # Get user parameters
 parser = argparse.ArgumentParser(description="Spherical predictor")
 parser.add_argument(
-    "--data", default="hcp", choices=("hbn", "euaims", "hcp", "openbhb", "privatebhb"),
+    "--data", default="openbhb", choices=("hbn", "openbhb", "privatebhb"),
     help="the input cohort name.")
 parser.add_argument(
     "--datadir", metavar="DIR", help="data directory path.", required=True)
@@ -40,11 +40,8 @@ parser.add_argument(
     "--method", default="regression", choices=("regression", "classification"),
     help="the prediction method.")
 parser.add_argument(
-    "--pretrained-setup", default="None",
-    help="the pretrained encoder's id.")
-parser.add_argument(
     "--setups-file", default="None", required=True,
-    help="the path to the file linking the setups to the pretrained encoder's path.")
+    help="the path to the file linking the setups to the trained encoder's path.")
 args = parser.parse_args()
 args.conv = "DiNe"
 args.ico_order = 5
@@ -90,187 +87,134 @@ def matching_args_to_case(args, cases):
     return None
 
 setups = pd.read_table(args.setups_file)
-if args.pretrained_setup != "None":
-    params, epoch = setups[setups["id"] == int(args.pretrained_setup)][[
-        "args", f"best_epoch_{args.to_predict}"]].values[0]
-    pretrained_path = os.path.join(
-            "/".join(args.setups_file.split("/")[:-1]),
-            "checkpoints", args.pretrained_setup,
-            "model_epoch_{}.pth".format(int(epoch)))
-    if int(args.pretrained_setup) < 10000:
-        pretrained_path = params
-        pretrained_path = pretrained_path.replace(
-            "encoder.pth", "model_epoch_{}.pth".format(int(epoch)))
-    args = params_from_args(params, args)
-    
-    checkpoint = torch.load(pretrained_path, map_location=device)
-    checkpoint = encoder_cp_from_model_cp(checkpoint)
-    checkpoints = [checkpoint]
-    setup_ids = [int(args.pretrained_setup)]
-else:
-    validation_metric = "mae" if args.method == "regression" else "bacc"
-    best_is_low = validation_metric == "mae"
-    regressor_params = [0.01, 0.1, 1, 10, 100]
-    def cases(latent_dim=128, batch_size=1024):
-        cases = dict(
-            simCLR_base={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": True,
-            "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size, "epochs": 350},
-            simCLR_base_hemi={"algo": "simCLR", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
-            "blur": True, "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size, "epochs": 350},
-            simCLR_base_group={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
-            "blur": True, "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size, "epochs": 350},
-            simCLR_cutout={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": False,
-            "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
-            simCLR_blur={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": False, "blur": True,
-            "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size, "epochs": 350},
-            simCLR_noise={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": False, "blur": False,
-            "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
-            simCLR_hemi={"algo": "simCLR", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": False,
-            "blur": False, "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size, "epochs": 350},
-            simCLR_group={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": False,
-            "blur": False, "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size, "epochs": 350},
-            simCLR_new_base={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": False,
-            "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
-            simCLR_new_hemi={"algo": "simCLR", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
-            "blur": False, "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
-            simCLR_new_group={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
-            "blur": False, "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
-            simCLR_base_less_blur={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": True,
-            "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size, "epochs": 410},
-            simCLR_hemi_less_blur={"algo": "simCLR", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
-            "blur": True, "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size, "epochs": 410},
-            simCLR_group_less_blur={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
-            "blur": True, "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size, "epochs": 410},
-            simCLR_less_blur={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": False, "blur": True,
-            "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size, "epochs": 320},
-            barlow_base={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": True,
-            "noise": True, "latent_dim": latent_dim, "batch_size": batch_size},
-            barlow_hemi={"algo": "barlow", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
-            "blur": True, "noise": True, "latent_dim": latent_dim, "batch_size": batch_size},
-            barlow_group={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
-            "blur": True, "noise": True, "latent_dim": latent_dim, "batch_size": batch_size},
-            barlow_cutout={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": False,
-            "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
-            barlow_blur={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": 0, "cutout": False, "blur": True,
-            "noise": False, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
-            barlow_noise={"algo": "barlow", "inter_modal_augment": 0, "batch_augment": 0, "cutout": False, "blur": False,
-            "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
-            supervised={"supervised": True})
-        return cases
-    cases = cases(128, 1024)
-    best_cp_per_case = dict()
-    to_predict, method = args.to_predict, args.method
-    for setup_id in setups["id"].values:
-        params, epoch, best_param, best_value = setups[
-            setups["id"] == setup_id][[
-                "args", f"best_epoch_{args.to_predict}",
-                f"best_param_{args.to_predict}",
-                f"best_value_{args.to_predict}"]].values[0]
-        compute_stds = False
-        same_params_setups = setups[setups["args"] == params]
-        if len(same_params_setups) > 1:
-            compute_stds = True
-        to_predict = args.to_predict
-        local_args, supervised = params_from_args(params, args)
-        args.to_predict = to_predict
-        if not hasattr(local_args, "algo"):
-            local_args.algo = "barlow"
-        if not hasattr(local_args, "sigma"):
-            local_args.sigma = 0
-        if not hasattr(local_args, "noise"):
-            local_args.noise = False
-        if not hasattr(local_args, "projector"):
-            local_args.projector = "256-512-512" if local_args.algo == "barlow" else "256-128"
-        if supervised:
-            local_args.supervised = True
-        case = matching_args_to_case(local_args, cases)
-        if case is not None and epoch > 0 and local_args.ico_order == 5:
-            if compute_stds:
-                metric_per_epoch_per_param = [[[] for _ in range(int(local_args.epochs / 10))] for _ in regressor_params]
-                setup_ids = []
-                for _setup_id in same_params_setups["id"].values:
-                    cp_path = os.path.join(
-                        "/".join(args.setups_file.split("/")[:-1]),
-                        "checkpoints", str(_setup_id))
-                    validation_metrics_path = os.path.join(
-                        cp_path, f"validation_metrics_{args.to_predict}.json")
-                    if not os.path.exists(validation_metrics_path):
-                        continue
-                    with open(validation_metrics_path, "r") as f:
-                        validation_metrics = json.load(f)
-                    for param_idx, _ in enumerate(regressor_params):
-                        for epoch_idx, epoch in enumerate(validation_metrics["epochs"]):
-                            nth_cp = int(epoch / 10) - 1
-                            metric_per_epoch_per_param[param_idx][
-                                nth_cp].append(validation_metrics[
-                                    validation_metric][param_idx][epoch_idx])
-                    setup_ids.append(_setup_id)
-                if len(setup_ids) == 0:
-                    continue
-                average_metric_per_epoch_per_param = np.mean(
-                    metric_per_epoch_per_param, axis=2)
-                best_epoch_per_param_index = np.argsort(
-                    average_metric_per_epoch_per_param)[
-                        :, 0 if best_is_low else -1]
-                best_param_idx = np.argsort(average_metric_per_epoch_per_param[
-                    list(range(len(regressor_params))), best_epoch_per_param_index])[
-                        0 if best_is_low else -1]
-                best_value = average_metric_per_epoch_per_param[
-                    best_param_idx][best_epoch_per_param_index[best_param_idx]]
-                best_param = regressor_params[best_param_idx]
-                best_epoch = int((best_epoch_per_param_index[
-                    best_param_idx] + 1) * 10)
-                checkpoints = []
-                for _setup_id in setup_ids:
-                    cp_path = os.path.join(
-                        "/".join(args.setups_file.split("/")[:-1]),
-                        "checkpoints", str(_setup_id),
-                        f"model_epoch_{best_epoch}.pth")
-                    checkpoint = torch.load(cp_path, map_location=device)
-                    encoder_prefix = "0" if supervised else "backbone"
-                    checkpoint = encoder_cp_from_model_cp(checkpoint, encoder_prefix)
-                    checkpoints.append(checkpoint)
-                if case not in best_cp_per_case.keys():
-                    best_cp_per_case[case] = (
-                        setup_ids, checkpoints, best_value, best_param, best_epoch)
-                if ((best_cp_per_case[case][2] > best_value and best_is_low
-                     and len(best_cp_per_case[case][0]) <= len(setup_ids))
-                    or (best_cp_per_case[case][2] < best_value and
-                        not best_is_low and
-                        len(best_cp_per_case[case][0]) <= len(setup_ids))
-                        or len(best_cp_per_case[case][0]) < len(setup_ids)):
-                    best_cp_per_case[case] = (
-                        setup_ids, checkpoints, best_value, best_param, best_epoch)
-            else:
-                pretrained_path = os.path.join(
+
+validation_metric = "mae" if args.method == "regression" else "bacc"
+best_is_low = validation_metric == "mae"
+regressor_params = [0.01, 0.1, 1, 10, 100]
+def cases(latent_dim=128, batch_size=1024):
+    cases = dict(
+        simCLR_base={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": True,
+        "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
+        simCLR_base_hemi={"algo": "simCLR", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
+        "blur": True, "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
+        simCLR_base_group={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
+        "blur": True, "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
+        supervised={"supervised": True})
+    return cases
+cases = cases(128, 1024)
+best_cp_per_case = dict()
+to_predict, method = args.to_predict, args.method
+for setup_id in setups["id"].values:
+    params, epoch, best_param, best_value = setups[
+        setups["id"] == setup_id][[
+            "args", f"best_epoch_{args.to_predict}",
+            f"best_param_{args.to_predict}",
+            f"best_value_{args.to_predict}"]].values[0]
+    compute_stds = False
+    same_params_setups = setups[setups["args"] == params]
+    if len(same_params_setups) > 1:
+        compute_stds = True
+    to_predict = args.to_predict
+    local_args, supervised = params_from_args(params, args)
+    args.to_predict = to_predict
+    if not hasattr(local_args, "algo"):
+        local_args.algo = "barlow"
+    if not hasattr(local_args, "sigma"):
+        local_args.sigma = 0
+    if not hasattr(local_args, "noise"):
+        local_args.noise = False
+    if not hasattr(local_args, "projector"):
+        local_args.projector = "256-512-512" if local_args.algo == "barlow" else "256-128"
+    if supervised:
+        local_args.supervised = True
+    case = matching_args_to_case(local_args, cases)
+    if case is not None and epoch > 0 and local_args.ico_order == 5:
+        if compute_stds:
+            metric_per_epoch_per_param = [[[] for _ in range(int(local_args.epochs / 10))] for _ in regressor_params]
+            setup_ids = []
+            for _setup_id in same_params_setups["id"].values:
+                cp_path = os.path.join(
                     "/".join(args.setups_file.split("/")[:-1]),
-                    "checkpoints", str(setup_id),
-                    "model_epoch_{}.pth".format(int(epoch)))
-                if int(setup_id) < 10000:
-                    pretrained_path = params
-                    pretrained_path = pretrained_path.replace(
-                        "encoder.pth", "model_epoch_{}.pth".format(int(epoch)))
-                checkpoint = torch.load(pretrained_path, map_location=device)
+                    "checkpoints", str(_setup_id))
+                validation_metrics_path = os.path.join(
+                    cp_path, f"validation_metrics_{args.to_predict}.json")
+                if not os.path.exists(validation_metrics_path):
+                    continue
+                with open(validation_metrics_path, "r") as f:
+                    validation_metrics = json.load(f)
+                for param_idx, _ in enumerate(regressor_params):
+                    for epoch_idx, epoch in enumerate(validation_metrics["epochs"]):
+                        nth_cp = int(epoch / 10) - 1
+                        metric_per_epoch_per_param[param_idx][
+                            nth_cp].append(validation_metrics[
+                                validation_metric][param_idx][epoch_idx])
+                setup_ids.append(_setup_id)
+            if len(setup_ids) == 0:
+                continue
+            average_metric_per_epoch_per_param = np.mean(
+                metric_per_epoch_per_param, axis=2)
+            best_epoch_per_param_index = np.argsort(
+                average_metric_per_epoch_per_param)[
+                    :, 0 if best_is_low else -1]
+            best_param_idx = np.argsort(average_metric_per_epoch_per_param[
+                list(range(len(regressor_params))), best_epoch_per_param_index])[
+                    0 if best_is_low else -1]
+            best_value = average_metric_per_epoch_per_param[
+                best_param_idx][best_epoch_per_param_index[best_param_idx]]
+            best_param = regressor_params[best_param_idx]
+            best_epoch = int((best_epoch_per_param_index[
+                best_param_idx] + 1) * 10)
+            checkpoints = []
+            for _setup_id in setup_ids:
+                cp_path = os.path.join(
+                    "/".join(args.setups_file.split("/")[:-1]),
+                    "checkpoints", str(_setup_id),
+                    f"model_epoch_{best_epoch}.pth")
+                checkpoint = torch.load(cp_path, map_location=device)
                 encoder_prefix = "0" if supervised else "backbone"
                 checkpoint = encoder_cp_from_model_cp(checkpoint, encoder_prefix)
-                
-                if case not in best_cp_per_case.keys():
-                    best_cp_per_case[case] = (
-                        [setup_id], [checkpoint], best_value, best_param, epoch)
-                if ((best_cp_per_case[case][2] > best_value and best_is_low)
-                    or (best_cp_per_case[case][2] < best_value and
-                        not best_is_low)) and len(best_cp_per_case[case][0]) <= 1:
-                    best_cp_per_case[case] = (
-                        [setup_id], [checkpoint], best_value, best_param, epoch)
-    checkpoints = [best_cp_per_case[case][1] for case in cases.keys()
-                   if case in best_cp_per_case.keys()]
-    setup_ids = [best_cp_per_case[case][0] for case in cases.keys()
-                 if case in best_cp_per_case.keys()]
-    best_regressor_params = [best_cp_per_case[case][3] for case in cases.keys()
-                             if case in best_cp_per_case.keys()]
-    cases_names = [case for case in cases.keys()
-                   if case in best_cp_per_case.keys()]
-    args.to_predict, args.method = to_predict, method
+                checkpoints.append(checkpoint)
+            if case not in best_cp_per_case.keys():
+                best_cp_per_case[case] = (
+                    setup_ids, checkpoints, best_value, best_param, best_epoch)
+            if ((best_cp_per_case[case][2] > best_value and best_is_low
+                    and len(best_cp_per_case[case][0]) <= len(setup_ids))
+                or (best_cp_per_case[case][2] < best_value and
+                    not best_is_low and
+                    len(best_cp_per_case[case][0]) <= len(setup_ids))
+                    or len(best_cp_per_case[case][0]) < len(setup_ids)):
+                best_cp_per_case[case] = (
+                    setup_ids, checkpoints, best_value, best_param, best_epoch)
+        else:
+            pretrained_path = os.path.join(
+                "/".join(args.setups_file.split("/")[:-1]),
+                "checkpoints", str(setup_id),
+                "model_epoch_{}.pth".format(int(epoch)))
+            if int(setup_id) < 10000:
+                pretrained_path = params
+                pretrained_path = pretrained_path.replace(
+                    "encoder.pth", "model_epoch_{}.pth".format(int(epoch)))
+            checkpoint = torch.load(pretrained_path, map_location=device)
+            encoder_prefix = "0" if supervised else "backbone"
+            checkpoint = encoder_cp_from_model_cp(checkpoint, encoder_prefix)
+            
+            if case not in best_cp_per_case.keys():
+                best_cp_per_case[case] = (
+                    [setup_id], [checkpoint], best_value, best_param, epoch)
+            if ((best_cp_per_case[case][2] > best_value and best_is_low)
+                or (best_cp_per_case[case][2] < best_value and
+                    not best_is_low)) and len(best_cp_per_case[case][0]) <= 1:
+                best_cp_per_case[case] = (
+                    [setup_id], [checkpoint], best_value, best_param, epoch)
+checkpoints = [best_cp_per_case[case][1] for case in cases.keys()
+                if case in best_cp_per_case.keys()]
+setup_ids = [best_cp_per_case[case][0] for case in cases.keys()
+                if case in best_cp_per_case.keys()]
+best_regressor_params = [best_cp_per_case[case][3] for case in cases.keys()
+                            if case in best_cp_per_case.keys()]
+cases_names = [case for case in cases.keys()
+                if case in best_cp_per_case.keys()]
+args.to_predict, args.method = to_predict, method
 
 # print(setup_ids)
 print("".join(f"{case} : {best_cp_per_case[case][0]}, best value "
@@ -298,10 +242,10 @@ kwargs = {
     "surface-lh": {"metrics": metrics},
 }
 
-if args.data in ["hbn", "euaims"]:
+if args.data == "hbn":
     kwargs["surface-lh"]["symetrized"] = True
     kwargs["surface-rh"]["symetrized"] = True
-    if args.to_predict not in ["sex", "age", "site", "asd"]:
+    if args.to_predict not in ["sex", "age", "site"]:
         all_modalities.append("clinical")
         kwargs["clinical"] = dict(cols=[args.to_predict])
 
@@ -311,8 +255,6 @@ validation = None
 if args.data not in ["openbhb", "privatebhb"]:
     test_size = 0.2
     validation = 5
-    if args.to_predict == "asd":
-        stratify.append("asd")
 
 
 dataset = DataManager(
@@ -602,10 +544,10 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
                 all_metrics[name].append([])
 
         run_name = (
-            "deepint_evaluate_representations_to_predict_{}_{}_predict_via_{}"
-            "_pretrained_{}_case_{}").format(
+            "evaluate_representations_on_{}_to_predict_{}_via_{}_for_setup_{}"
+            "_case_{}").format(
                 args.data, args.to_predict, args.method, setup_id,
-                None if args.pretrained_setup != "None" else list(cases)[case_id])
+                list(cases)[case_id])
 
         case_resdir = os.path.join(resdir, run_name)
         if not os.path.isdir(case_resdir):

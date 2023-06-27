@@ -8,7 +8,7 @@ import joblib
 import numpy as np
 from matplotlib import pyplot as plt
 from sklearn.decomposition import PCA
-from sklearn.metrics import r2_score, mean_absolute_error, accuracy_score, balanced_accuracy_score
+from sklearn.metrics import mean_absolute_error
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.linear_model import Ridge, LogisticRegression
@@ -24,14 +24,11 @@ from surfify.utils import setup_logging, icosahedron, downsample_data, downsampl
 from brainboard import Board
 
 from multimodaldatasets.datasets import DataManager, DataLoaderWithBatchAugmentation
-from augmentations import Normalize, PermuteBeetweenModalities, Bootstrapping, Reshape, Transformer, SwitchModalities
-from models import BarlowTwins, yAwareSimCLR, simCLR
+from augmentations import Normalize, HemiMixUp, GroupMixUp, Reshape, Transformer
+from ssl_model import simCLR
 
 
-parser = argparse.ArgumentParser(description="Train Barlow Twins")
-parser.add_argument(
-    "--data", default="hbn", choices=("hbn", "euaims", "hcp", "openbhb"),
-    help="the input cohort name.")
+parser = argparse.ArgumentParser(description="Train SCNN in a self-supervised manner using SimCLR.")
 parser.add_argument(
     "--datadir", metavar="DIR", help="data directory path.", required=True)
 parser.add_argument(
@@ -50,7 +47,7 @@ parser.add_argument(
     '--learning-rate', "-lr", default=1e-3, type=float,
     help='learning rate')
 parser.add_argument(
-    '--loss-param', default=0.0051, type=float, metavar='L',
+    '--loss-param', default=0.1, type=float, metavar='L',
     help='weight on off-diagonal terms')
 parser.add_argument(
     "--weight-decay", default=1e-6, type=float, metavar="W",
@@ -59,7 +56,7 @@ parser.add_argument(
     "--conv-filters", default="128-128-256-256", type=str, metavar="F",
     help="convolutional filters at each layer.")
 parser.add_argument(
-    "--projector", default="256-512-512", type=str, metavar="F",
+    "--projector", default="512-256", type=str, metavar="F",
     help="projector linear layers.")
 parser.add_argument(
     "--fusion-level", default=1, type=int, metavar="W",
@@ -79,11 +76,11 @@ parser.add_argument(
     "--save-freq", default=10, type=int,
     help="saving frequence (as number of epochs) during training.")
 parser.add_argument(
-    "--batch-augment", "-ba", default=0.0, type=float,
-    help="optionnally uses batch augmentation.")
+    "--groupmixup", "-gm", default=0.0, type=float,
+    help="optionnally uses groupmixup.")
 parser.add_argument(
-    "--inter-modal-augment", "-ima", default=0.0, type=float,
-    help="optionnally uses inter modality augment.")
+    "--hemimixup", "-hm", default=0.0, type=float,
+    help="optionnally uses hemimixup augment.")
 parser.add_argument(
     "--blur", action="store_true",
     help="optionnally uses gaussian blur augment.")
@@ -104,15 +101,6 @@ parser.add_argument(
     "--reduce-lr", action="store_true",
     help="optionnally reduces the learning rate during training.")
 parser.add_argument(
-    "--sigma", default=0.0, type=float,
-    help="y-aware sigma parameter.")
-parser.add_argument(
-    "--algo", default="barlow", choices=("barlow", "simCLR"),
-    help="the self-supervised algo.")
-parser.add_argument(
-    "--flip", action="store_true",
-    help="optionnally uses flip augment.")
-parser.add_argument(
     "--run-id", type=int,
     help="Run id when ambiguous parameters"
 )
@@ -122,6 +110,8 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 args.ngpus_per_node = torch.cuda.device_count()
 args.conv_filters = [int(item) for item in args.conv_filters.split("-")]
 args.conv = "DiNe"
+args.algo = "simCLR"
+args.data = "openbhb"
 
 # Load the input cortical data
 modalities = ["surface-lh", "surface-rh"]
@@ -135,17 +125,16 @@ overwrite = False
 n_features = len(metrics)
 activation = "ReLU"
 
-params = ("pretrain_{}_on_{}_surf_order_{}_with_{}_features_fusion_{}_act_{}"
-    "_bn_{}_conv_{}_latent_{}_wd_{}_{}_epochs_lr_{}_reduced_{}_bs_{}_ba_{}_ima"
+params = ("train_ssl_{}_on_{}_surf_order_{}_with_{}_features_fusion_{}_act_{}"
+    "_bn_{}_conv_{}_latent_{}_wd_{}_{}_epochs_lr_{}_reduced_{}_bs_{}_gm_{}_hm"
     "_{}_blur_{}_noise_{}_cutout_{}_normalize_{}_standardize_{}_loss_param_{}_"
-    "sigma_{}_projector_{}").format(
+    "projector_{}").format(
         args.algo, args.data, args.ico_order, n_features, args.fusion_level,
         activation, args.batch_norm, "-".join([str(s) for s in args.conv_filters]),
         args.latent_dim, args.weight_decay, args.epochs, args.learning_rate,
-        args.reduce_lr, args.batch_size, args.batch_augment,
-        args.inter_modal_augment, args.blur, args.noise, args.cutout,
-        args.normalize, args.standardize, args.loss_param, args.sigma,
-        args.projector)
+        args.reduce_lr, args.batch_size, args.groupmixup, args.hemimixup,
+        args.blur, args.noise, args.cutout, args.normalize, args.standardize,
+        args.loss_param, args.projector)
 
 # Prepare process
 setup_logging(level="info", logfile=None)
@@ -232,11 +221,10 @@ backbone = SphericalHemiFusionEncoder(
 kwargs = {
     "surface-rh": {"metrics": metrics},
     "surface-lh": {"metrics": metrics},
-    # "clinical": {"z_score": False}
 }
 
 scalers = {mod: None for mod in modalities}
-if args.batch_augment > 0 or args.standardize:
+if args.groupmixup > 0 or args.standardize:
     original_dataset = DataManager(
         dataset=args.data, datasetdir=args.datadir,
         stratify_on=["sex", "age", "site"], discretize=["age"],
@@ -251,14 +239,14 @@ if args.batch_augment > 0 or args.standardize:
     valid_loader = torch.utils.data.DataLoader(
         original_dataset["test"], batch_size=args.batch_size, num_workers=6,
         pin_memory=True, shuffle=True)
-    if args.batch_augment > 0:
+    if args.groupmixup > 0:
         groups = {}
         groups_valid = {}
         batch_transforms = {}
         batch_transforms_valid = {}
     for modality in modalities:
         path_to_scaler = os.path.join(args.datadir, f"{modality}_scaler.save")
-        if not os.path.exists(path_to_scaler) or args.batch_augment > 0 or overwrite:
+        if not os.path.exists(path_to_scaler) or args.groupmixup > 0 or overwrite:
             regressor = KNeighborsRegressor(n_neighbors=30)
             residualizer = CombatModel()
             check_site_biasor = LogisticRegression()
@@ -304,7 +292,7 @@ if args.batch_augment > 0 or args.standardize:
                 torch.squeeze,
                 Reshape(input_shape),
             ])
-        if args.batch_augment > 0:
+        if args.groupmixup > 0:
             print(f"Initializing KNN for {modality}")
             X = scaler.transform(X)
             X_valid = scaler.transform(X_valid)
@@ -342,17 +330,17 @@ if args.batch_augment > 0 or args.standardize:
             groups_valid[modality] = neigh_idx_valid
             print("Groups built.")
             
-            probabilities = (0.5, 0.5)#(1, 0.1) if args.algo == "barlow" else (0.5, 0.5)
-            batch_transforms[modality] = Bootstrapping(
-                p=probabilities, p_corrupt=args.batch_augment,
+            probabilities = (0.5, 0.5)
+            batch_transforms[modality] = GroupMixUp(
+                p=probabilities, p_corrupt=args.groupmixup,
                 groups=groups[modality])
-            batch_transforms_valid[modality] = Bootstrapping(
-                p=probabilities, p_corrupt=args.batch_augment,
+            batch_transforms_valid[modality] = GroupMixUp(
+                p=probabilities, p_corrupt=args.groupmixup,
                 groups=groups_valid[modality])
 
 
 normalize = args.normalize
-if args.inter_modal_augment > 0 or args.batch_augment > 0:
+if args.hemimixup > 0 or args.groupmixup > 0:
     normalize = False
 
 on_the_fly_transform = dict()
@@ -368,18 +356,10 @@ for modality in modalities:
             ico.vertices, ico.triangles,
             sigma=interval((0.1, 1), float),
             cachedir=os.path.join(args.outdir, "cached_ico_infos"))
-        if args.algo == "barlow":
-            transformer.register(trf, pipeline="hard")
-            transformer.register(trf, probability=0.1, pipeline="soft")
-        else:
-            transformer.register(trf, probability=0.5)
+        transformer.register(trf, probability=0.5)
     if args.noise:
         trf = SurfNoise(sigma=interval((0.1, 2), float))
-        if args.algo == "barlow":
-            transformer.register(trf, pipeline="hard")
-            transformer.register(trf, probability=0.1, pipeline="soft")
-        else:
-            transformer.register(trf, probability=0.5)
+        transformer.register(trf, probability=0.5)
     if args.cutout:
         ico = backbone.ico[args.ico_order]
         t = time.time()
@@ -389,18 +369,14 @@ for modality in modalities:
             patch_size=interval((1, patch_size), int),
             cachedir=os.path.join(args.outdir, "cached_ico_infos"))
         # print(time.time() - t)
-        if args.algo == "barlow":
-            transformer.register(trf, pipeline="hard")
-            transformer.register(trf, probability=0.5, pipeline="soft")
-        else:
-            transformer.register(trf, probability=0.5)
+        transformer.register(trf, probability=0.5)
     on_the_fly_transform[modality] = transformer
 
-if args.inter_modal_augment > 0:
-    normalizer = Normalize() if args.batch_augment == 0 and normalize else None
-    probabilities = (0.5, 0.5)#(1, 0.1) if args.algo == "barlow" else (0.5, 0.5)
-    on_the_fly_inter_transform = PermuteBeetweenModalities(
-        probabilities, args.inter_modal_augment, ("surface-lh", "surface-rh"),
+if args.hemimixup > 0:
+    normalizer = Normalize() if args.groupmixup == 0 and normalize else None
+    probabilities = (0.5, 0.5)
+    on_the_fly_inter_transform = HemiMixUp(
+        probabilities, args.hemimixup, ("surface-lh", "surface-rh"),
         normalizer)
 
 
@@ -447,13 +423,7 @@ valid_no_augment_loader = torch.utils.data.DataLoader(
 # print(len(loader))
 # print(len(valid_loader))
 
-if args.algo == "barlow":
-    model = BarlowTwins(args, backbone).to(device)
-elif args.sigma > 0:
-    model = yAwareSimCLR(args, backbone, return_logits=True).to(device)
-else:
-    model = simCLR(args, backbone, return_logits=True).to(device)
-
+model = simCLR(args, backbone, return_logits=True).to(device)
 
 optimizer = optim.Adam(
     model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
@@ -512,13 +482,10 @@ for epoch in range(start_epoch, args.epochs + 1):
         y2_rh = y2_rh.float().to(device)
         labels = metadata["age"].float().to(device)
         forwarded = [(y1_lh, y1_rh), (y2_lh, y2_rh)]
-        if args.algo == "simCLR" and args.sigma > 0:
-            forwarded.append(labels)
         optimizer.zero_grad()
         with torch.cuda.amp.autocast():
             loss = model.forward(*forwarded)
-        if args.algo == "simCLR":
-            loss = loss[0]
+        loss, logits, target = loss
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
@@ -545,14 +512,9 @@ for epoch in range(start_epoch, args.epochs + 1):
             y2_rh = y2_rh.float().to(device)
             labels = metadata["age"].float().to(device)
             forwarded = [(y1_lh, y1_rh), (y2_lh, y2_rh)]
-            if args.algo == "simCLR" and args.sigma > 0:
-                forwarded.append(labels)
             with torch.cuda.amp.autocast():
                 loss = model.forward(*forwarded)
-            
-            if args.algo == "simCLR":
-                loss, logits, target = loss
-            
+            loss, logits, target = loss
             stats["valid_loss"] += loss.item()
 
         all_representations = []
@@ -697,6 +659,3 @@ if last_average_valid_perfs < best_valid_perf:
 module_to_save = model.backbone
 torch.save(module_to_save.state_dict(),
            os.path.join(checkpoint_dir, "encoder.pth"))
-
-
-

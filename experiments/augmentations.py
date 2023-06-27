@@ -95,25 +95,6 @@ class RescaleAsImage(object):
             rescaled_data = rescaled_data.scatter_(self.channel_dim, torch_idx, rescaled_values)
         return rescaled_data
 
-class GaussianBlur(object):
-    def __init__(self, p):
-        self.p = p
-
-    def __call__(self, img):
-        if random.random() < self.p:
-            sigma = random.random() * 1.9 + 0.1
-            return img.filter(ImageFilter.GaussianBlur(sigma))
-        return img
-
-
-class Permute(object):
-    def __init__(self, new_order):
-        self.order = new_order
-
-    def __call__(self, arr):
-        if len(arr.shape) < len(self.order):
-            arr = arr.unsqueeze(max(self.order))
-        return torch.permute(arr, self.order)
 
 class Reshape(object):
     def __init__(self, shape):
@@ -136,50 +117,7 @@ class Normalize(object):
                 dim=tuple(range(self.channel_dim + 1, len(arr.shape))),
                 keepdim=True) + self.eps)  + self.mean)
 
-
-class Cutout(object):
-    """Apply a cutout on the images
-    cf. Improved Regularization of Convolutional Neural Networks with Cutout, arXiv, 2017
-    We assume that the square to be cut is inside the image.
-    """
-    def __init__(self, patch_size=None, value=0, random_size=False, inplace=False, localization=None, p=0.5):
-        self.patch_size = patch_size
-        self.value = value
-        self.random_size = random_size
-        self.inplace = inplace
-        self.localization = localization
-        self.p = p
-
-    def __call__(self, arr):
-        if random.random() < self.p:
-            img_shape = np.array(arr.shape)
-            if type(self.patch_size) == int:
-                size = [self.patch_size for _ in range(len(img_shape))]
-            else:
-                size = np.copy(self.patch_size)
-            assert len(size) == len(img_shape), "Incorrect patch dimension."
-            indexes = []
-            for ndim in range(len(img_shape)):
-                if size[ndim] > img_shape[ndim] or size[ndim] < 0:
-                    size[ndim] = img_shape[ndim]
-                if self.random_size:
-                    size[ndim] = np.random.randint(0, size[ndim])
-                if self.localization is not None:
-                    delta_before = max(self.localization[ndim] - size[ndim]//2, 0)
-                else:
-                    delta_before = np.random.randint(0, img_shape[ndim] - size[ndim] + 1)
-                indexes.append(slice(int(delta_before), int(delta_before + size[ndim])))
-            if self.inplace:
-                arr[tuple(indexes)] = self.value
-                return arr
-            else:
-                arr_cut = torch.clone(arr)
-                arr_cut[tuple(indexes)] = self.value
-                return arr_cut
-        return arr
-
-
-class Bootstrapping(object):
+class GroupMixUp(object):
     def __init__(self, p, p_corrupt, across_channels=True,
                  groups=None, normalizer=Normalize(channel_dim=1)):
         self.p = p
@@ -265,7 +203,7 @@ class Bootstrapping(object):
             new_data = new_data[0]
         return new_data
 
-class PermuteBeetweenModalities(object):
+class HemiMixUp(object):
     def __init__(self, p, p_corrupt, modalities, across_channels=False,
                  normalizer=Normalize()):
         self.p = p
@@ -337,69 +275,3 @@ class PermuteBeetweenModalities(object):
         data[self.modalities[0]] = new_mod1
         data[self.modalities[1]] = new_mod2
         return data
-
-
-class SwitchModalities(object):
-    def __init__(self, p, modalities, across_channels=True,
-                 normalizer=Normalize()):
-        self.p = p
-        self.across_channels = across_channels
-        self.modalities = modalities
-        self.normalizer = normalizer
-
-        if type(modalities) not in [list, tuple] or len(modalities) != 2:
-            raise ValueError("modalities must contain exactly 2 data modalities.")
-
-    def __call__(self, data):
-
-        mod1 = data[self.modalities[0]]
-        mod2 = data[self.modalities[1]]
-
-        if type(mod1) != type(mod2):
-            raise ValueError("Both modalities must be of the same type.")
-
-        return_single = False
-        if type(mod1) not in [tuple, list]:
-            mod1 = [mod1]
-            mod2 = [mod2]
-            return_single = True
-
-        if type(self.p) not in [list, tuple]:
-            self.p = [self.p] * len(mod1)
-
-        if type(self.p_corrupt) not in [list, tuple]:
-            self.p_corrupt = [self.p_corrupt] * len(mod1)
-
-
-        if True in [mod1[i].shape != mod2[i].shape for i in range(len(mod1))]:
-            raise ValueError("Both modalities must have the same dimensions.")
-
-        new_mod1 = []
-        new_mod2 = []
-        for idx in range(len(mod1)):
-            shape = mod1[idx].shape
-            n_channels = shape[0]
-            new_data1 = mod1[idx]
-            new_data2 = mod2[idx]
-            if self.across_channels:
-                for channel_idx in range(n_channels):
-                    if np.random.random() < self.p[idx]:
-                        new_data1[channel_idx] = mod2[idx][channel_idx]
-                        new_data2[channel_idx] = mod1[idx][channel_idx]
-            elif np.random.random() < self.p[idx]:
-                new_data1 = mod2[idx]
-                new_data2 = mod1[idx]
-            if self.normalizer is not None:
-                new_data1 = self.normalizer(new_data1)
-                new_data2 = self.normalizer(new_data2)
-
-            new_mod1.append(new_data1)
-            new_mod2.append(new_data2)
-
-        if return_single:
-            new_mod1 = new_mod1[0]
-            new_mod2 = new_mod2[0]
-        data[self.modalities[0]] = new_mod1
-        data[self.modalities[1]] = new_mod2
-        return data
-

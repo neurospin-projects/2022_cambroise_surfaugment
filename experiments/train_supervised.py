@@ -3,15 +3,11 @@ import json
 import os
 import sys
 import time
-import shutil
 import numpy as np
 from tqdm import tqdm
 import joblib
-from matplotlib import pyplot as plt
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, roc_auc_score, r2_score, mean_squared_error, mean_absolute_error
-from sklearn.preprocessing import KBinsDiscretizer, StandardScaler, RobustScaler, OrdinalEncoder
-from sklearn.neighbors import KNeighborsRegressor
-from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import KBinsDiscretizer, StandardScaler, OrdinalEncoder
 import pandas as pd
 import torch
 from torch import nn, optim
@@ -20,16 +16,13 @@ from surfify.models import SphericalHemiFusionEncoder
 from surfify.utils import setup_logging, icosahedron, downsample_data, downsample
 from brainboard import Board
 
-from multimodaldatasets.datasets import DataManager, DataLoaderWithBatchAugmentation
-from augmentations import Permute, Normalize, GaussianBlur, RescaleAsImage, PermuteBeetweenModalities, Bootstrapping, Reshape, Transformer
+from multimodaldatasets.datasets import DataManager
+from augmentations import Normalize, Reshape, Transformer
 from utils import params_from_args
 
 
 # Get user parameters
 parser = argparse.ArgumentParser(description="Spherical predictor")
-parser.add_argument(
-    "--data", default="hcp", choices=("hbn", "euaims", "hcp", "openbhb", "privatebhb"),
-    help="the input cohort name.")
 parser.add_argument(
     "--datadir", metavar="DIR", help="data directory path.", required=True)
 parser.add_argument(
@@ -65,7 +58,7 @@ parser.add_argument(
     "--to-predict", default="age",
     help="the name of the variable to predict.")
 parser.add_argument(
-    "--method", default="regression", choices=("regression", "classification", "distribution"),
+    "--method", default="regression", choices=("regression", "classification"),
     help="the prediction method.")
 parser.add_argument(
     "--loss", default="mse", choices=("mse", "l1"),
@@ -92,18 +85,9 @@ parser.add_argument(
 parser.add_argument(
     "--save-freq", default=10, type=int,
     help="saving frequence (as number of epochs) during training.")
-# parser.add_argument(
-#     "--batch-augment", "-ba", default=0.0, type=float,
-#     help="optionnally uses batch augmentation.")
-# parser.add_argument(
-#     "--inter-modal-augment", "-ima", default=0.0, type=float,
-#     help="optionnally uses inter modality augment.")
 parser.add_argument(
     "--momentum", default=0.0, type=float,
     help="optionnally uses SGD with momentum.")
-parser.add_argument(
-    "--mixup", default=0.0, type=float,
-    help="optionnally uses mixup augmentation and criterion.")
 parser.add_argument(
     "--reduce-lr", action="store_true",
     help="optionnally reduces the learning rate during training.")
@@ -125,19 +109,20 @@ metrics = ["thickness", "curv", "sulc"]
 args.conv = "DiNe"
 n_features = len(metrics)
 activation = "ReLU"
+args.data = "openbhb"
 if args.method == "classification":
     args.loss = "ce"
 args.conv_filters = [int(item) for item in args.conv_filters.split("-")]
 
 params = ("predict_{}_with_{}_on_{}_surf_order_{}_with_{}_features_fusion_{}_act_{}"
     "_bn_{}_conv_{}_latent_{}_wd_{}_{}_epochs_lr_{}_reduced_{}_bs_{}"
-    "_normalize_{}_standardize_{}_loss_{}_weighted_{}_mixup_{}"
-    "_momentum_{}_fut_{}_pretrained_setup_{}_epoch_{}_dr_{}_nlp_{}").format(
+    "_normalize_{}_standardize_{}_loss_{}_weighted_{}_momentum_{}"
+    "_fut_{}_pretrained_setup_{}_epoch_{}_dr_{}_nlp_{}").format(
         args.to_predict, args.method, args.data, args.ico_order, n_features, args.fusion_level,
         activation, args.batch_norm, "-".join([str(s) for s in args.conv_filters]),
         args.latent_dim, args.weight_decay, args.epochs, args.learning_rate,
         args.reduce_lr, args.batch_size, args.normalize, args.standardize,
-        args.loss, args.weight_criterion, args.mixup, args.momentum,
+        args.loss, args.weight_criterion, args.momentum,
         args.freeze_up_to, args.pretrained_setup, args.pretrained_epoch,
         args.dropout_rate, args.n_layers_predictor)
 
@@ -166,30 +151,6 @@ def same_params_but_epochs(args_str):
     return (params == args_str.replace(
         f"{epochs}_epochs", f"{args.epochs}_epochs"))
 
-# if args.start_epoch > 1:
-#     old_run_id = setups.loc[setups.args == params, "id"]
-#     other_run_id = setups.loc[setups.args.apply(same_params_but_epochs), "id"]
-#     if len(old_run_id) == 0 and len(other_run_id) > 0:
-#         other_run_id = other_run_id.values[0]
-#         print(other_run_id)
-#         old_path = os.path.join(checkpoint_dir, str(other_run_id))
-#         new_path = os.path.join(checkpoint_dir, str(run_id))
-#         os.makedirs(new_path)
-#         for file_name in os.listdir(old_path):
-#             old_file = os.path.join(old_path, file_name)
-#             new_file = os.path.join(new_path, file_name)
-#             if os.path.isfile(old_file):
-#                 shutil.copy(old_file, new_file)
-#     else:
-#         if len(old_run_id) > 1 and args.run_id == -1:
-#             raise ValueError("Parameters are ambiguous. You should provide a "
-#                              "run id to know what training to resume.")
-#         elif args.run_id != -1:
-#             run_id = args.run_id
-#         else:
-#             run_id = old_run_id.item()
-            
-# else:
 setups = pd.concat([
     setups,
     pd.DataFrame({
@@ -254,12 +215,6 @@ input_shape = (len(metrics), len(ico_verts))
 test_size = "defaults"
 stratify = ["sex", "age", "site"]
 validation = None
-if (args.data != "openbhb" and not
-    (args.to_predict == "age" and args.data == "privatebhb")):
-    test_size = 0.2
-    validation = 5
-    if args.to_predict == "asd":
-        stratify.append("asd")
 
 scaling = args.standardize
 normalize = args.normalize
@@ -343,16 +298,6 @@ else:
         on_the_fly_transform["train"][-1][modality] = transformer
         on_the_fly_transform["test"][modality] = transformer
 
-# normalize = True
-# if args.inter_modal_augment > 0 or args.batch_augment > 0:
-#     normalize = False
-
-
-# if args.inter_modal_augment > 0:
-#     normalizer = Normalize() if args.batch_augment == 0 else None
-#     on_the_fly_inter_transform = PermuteBeetweenModalities(
-#         args.inter_modal_augment, 0.3, ("surface-lh", "surface-rh"),
-#         normalizer)
 
 batch_transforms = None
 batch_transforms_valid = None
@@ -366,21 +311,15 @@ kwargs = {
 }
 
 all_modalities = modalities.copy()
-if args.data in ["hbn", "euaims"]:
-    kwargs["surface-lh"]["symetrized"] = True
-    kwargs["surface-rh"]["symetrized"] = True
-
-    if args.to_predict not in stratify:
-        all_modalities.append("clinical")
 
 dataset = DataManager(dataset=args.data, datasetdir=args.datadir,
                       modalities=all_modalities, validation=validation,
                       stratify=stratify, discretize=["age"],
-                      transform=transform, on_the_fly_transform=on_the_fly_transform,
+                      transform=transform, 
+                      on_the_fly_transform=on_the_fly_transform,
                       overwrite=False, test_size=test_size, **kwargs)
-if args.data == "openbhb":
-    dataset.create_val_from_test(
-        val_size=0.5, stratify=stratify, discretize=["age"])
+dataset.create_val_from_test(
+    val_size=0.5, stratify=stratify, discretize=["age"])
 
 valid_loaders = []
 if validation is None:
@@ -406,9 +345,7 @@ else:
     train_loaders.append(torch.utils.data.DataLoader(
             dataset["train"]["all"], batch_size=args.batch_size,
             num_workers=6, pin_memory=True, shuffle=True))
-test_dataset = dataset["test"]
-if args.data == "openbhb":
-    test_dataset = test_dataset["test"]
+test_dataset = dataset["test"]["test"]
 test_loader = torch.utils.data.DataLoader(
     test_dataset, batch_size=args.batch_size, num_workers=6,
     pin_memory=True, shuffle=True)
@@ -521,19 +458,6 @@ else:
 
 n_features = len(metrics)
 
-def mixup_data(left_x, right_x, y, l):
-    """Returns mixed inputs, pairs of targets, and lambda"""
-    indices = torch.randperm(left_x.shape[0]).to(left_x.device)
-
-    mixed_left_x = l * left_x + (1 - l) * left_x[indices]
-    mixed_right_x = l * right_x + (1 - l) * right_x[indices]
-    y_a, y_b = y, y[indices]
-    return mixed_left_x, mixed_right_x, y_a, y_b
-
-
-def mixup_criterion(criterion, pred, y_a, y_b, l):
-    return l * criterion(pred, y_a) + (1 - l) * criterion(pred, y_b)
-
 use_board = False
 show_pbar = True
 
@@ -552,109 +476,6 @@ class ConcatAlongDim(nn.Module):
 
     def forward(self, x):
         return torch.cat(x, dim=self.dim)
-
-
-# for fold in range(n_folds):
-#     print("Training on fold {} / {}".format(fold + 1, n_folds))
-    # if args.batch_augment > 0:
-    #     original_dataset = DataManager(
-    #         dataset=args.data, datasetdir=args.datadir,
-    #         modalities=modalities, transform=transform,
-    #         stratify=["sex", "age"], discretize=["age"],
-    #         overwrite=False, on_the_fly_transform=None,
-    #         on_the_fly_inter_transform=None,
-    #         validation=n_folds, **kwargs)
-
-    #     train_loader = torch.utils.data.DataLoader(
-    #         original_dataset["train"][fold]["train"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-    #         shuffle=True)
-    #     valid_loader = torch.utils.data.DataLoader(
-    #         original_dataset["train"][fold]["valid"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-    #         shuffle=True)
-    #     if args.evaluate:
-    #         train_loader = torch.utils.data.DataLoader(
-    #             original_dataset["train"]["all"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-    #             shuffle=True)
-    #         valid_loader = torch.utils.data.DataLoader(
-    #             original_dataset["test"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-    #             shuffle=True)
-        
-    #     if args.batch_augment > 0:
-    #         groups = {}
-    #         groups_valid = {}
-    #         print("Initializing KNN...")
-    #         for modality in ["surface-lh", "surface-rh"]:
-    #             regressor = KNeighborsRegressor(n_neighbors=30)
-    #             X, Y = [], []
-    #             X_valid, Y_valid = [], []
-    #             for x in train_loader:
-    #                 x, metadata, _ = x
-    #                 X += x[modality].view((len(x[modality]), -1)).tolist()
-    #                 Y += metadata["age"].tolist()
-        
-    #             for x in valid_loader:
-    #                 x, metadata, _ = x
-    #                 X_valid += x[modality].view((len(x[modality]), -1)).tolist()
-    #                 Y_valid += metadata["age"].tolist()
-
-    #             # print("Scaling")
-    #             scaler = StandardScaler()
-    #             X = scaler.fit_transform(X)
-    #             X_valid = scaler.transform(X_valid)
-    #             # print("Scaled")
-
-    #             # print("Reducting")
-    #             reductor = PCA(30)
-    #             X = reductor.fit_transform(X)
-    #             X_valid = reductor.transform(X_valid)
-    #             # print("Reducted")
-
-    #             regressor.fit(X, Y)
-    #             print(mean_absolute_error(Y, regressor.predict(X)))
-    #             print(mean_absolute_error(Y_valid, regressor.predict(X_valid)))
-    #             print(r2_score(Y, regressor.predict(X)))
-    #             print(r2_score(Y_valid, regressor.predict(X_valid)))
-    #             _, neigh_idx = regressor.kneighbors(X)
-    #             _, neigh_idx_valid = regressor.kneighbors(X_valid)
-    #             groups[modality] = neigh_idx
-    #             groups_valid[modality] = neigh_idx_valid
-    #         # print("Groups built.")
-
-    #         batch_transforms = {
-    #             "surface-lh": Bootstrapping(p=args.batch_augment, p_corrupt=0.3,
-    #                                         groups=groups["surface-lh"]),
-    #             "surface-rh": Bootstrapping(p=args.batch_augment, p_corrupt=0.3,
-    #                                         groups=groups["surface-rh"]),
-    #         }
-
-    #         batch_transforms_valid = {
-    #             "surface-lh": Bootstrapping(p=args.batch_augment, p_corrupt=0.3,
-    #                                         groups=groups_valid["surface-lh"]),
-    #             "surface-rh": Bootstrapping(p=args.batch_augment, p_corrupt=0.3,
-    #                                         groups=groups_valid["surface-rh"]),
-    #         }
-
-    # train_loader = DataLoaderWithBatchAugmentation(batch_transforms,
-    #     dataset["train"][fold]["train"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-    #     shuffle=True)
-    # valid_loader = DataLoaderWithBatchAugmentation(batch_transforms_valid,
-    #     dataset["train"][fold]["valid"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-    #     shuffle=True)
-
-
-    # train_loader = torch.utils.data.DataLoader(
-    #     dataset["train"][fold]["train"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-    #     shuffle=True)
-    # valid_loader = torch.utils.data.DataLoader(
-    #     dataset["train"][fold]["valid"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-    #     shuffle=True)
-    # if args.evaluate:
-    #     train_loader = DataLoaderWithBatchAugmentation(batch_transforms,
-    #         dataset["train"]["all"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-    #         shuffle=True)
-    #     valid_loader = DataLoaderWithBatchAugmentation(batch_transforms_valid,
-    #         dataset["test"], batch_size=args.batch_size, num_workers=6, pin_memory=True,
-    #         shuffle=True)
 
 
 all_metrics = {}
@@ -776,17 +597,11 @@ for fold, (train_loader, test_loader) in enumerate(
                 if args.to_predict == "sex":
                     new_y[new_y == -1] = 0
 
-                if args.mixup > 0:
-                    mixup_lambda = np.random.beta(args.mixup, args.mixup)
-                    left_x, right_x, y_a, y_b = mixup_data(left_x, right_x, new_y, mixup_lambda)
                 optimizer.zero_grad()
                 # with torch.cuda.amp.autocast():
                 X = (left_x, right_x)
                 y_hat = model(X).squeeze()
-                if args.mixup > 0:
-                    loss = mixup_criterion(criterion, y_hat, y_a, y_b, mixup_lambda)
-                else:
-                    loss = criterion(y_hat, new_y)
+                loss = criterion(y_hat, new_y)
 
                 preds = out_to_pred_func(y_hat)
                 real_preds = out_to_real_pred_func[fold](y_hat)
