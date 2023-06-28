@@ -138,14 +138,14 @@ params = ("train_ssl_{}_on_{}_surf_order_{}_with_{}_features_fusion_{}_act_{}"
 
 # Prepare process
 setup_logging(level="info", logfile=None)
-checkpoint_dir = os.path.join(args.outdir, "pretrain", "checkpoints")
+checkpoint_dir = os.path.join(args.outdir, "ssl_scnns", "checkpoints")
 if not os.path.isdir(checkpoint_dir):
     os.makedirs(checkpoint_dir)
 stats_file = open(os.path.join(checkpoint_dir, "stats.txt"), "a", buffering=1)
 print(" ".join(sys.argv))
 print(" ".join(sys.argv), file=stats_file)
 
-setups = pd.read_table(os.path.join(args.outdir, "pretrain", "setups.tsv"))
+setups = pd.read_table(os.path.join(args.outdir, "ssl_scnns", "setups.tsv"))
 run_id = int(time.time())
 
 def same_params_but_epochs(args_str):
@@ -193,7 +193,7 @@ else:
             "best_param": [1],
             "best_value": [1000]})],
         ignore_index=True)
-    setups.to_csv(os.path.join(args.outdir, "pretrain", "setups.tsv"),
+    setups.to_csv(os.path.join(args.outdir, "ssl_scnns", "setups.tsv"),
         index=False, sep="\t")
 print(run_id)
 
@@ -614,12 +614,12 @@ for epoch in range(start_epoch, args.epochs + 1):
                 best_saved_epoch = epoch
                 best_valid_perf = last_valid_perfs
                 setups = pd.read_table(
-                    os.path.join(args.outdir, "pretrain", "setups.tsv"))
+                    os.path.join(args.outdir, "ssl_scnns", "setups.tsv"))
                 setups.loc[setups["id"] == run_id,
                            ["best_epoch", "best_param", "best_value"]] = (
                     best_saved_epoch, regressor_params[best_param_idx],
                     best_valid_perf)
-                setups.to_csv(os.path.join(args.outdir, "pretrain", "setups.tsv"),
+                setups.to_csv(os.path.join(args.outdir, "ssl_scnns", "setups.tsv"),
                     index=False, sep="\t")
         # torch.save(model.backbone[0].state_dict(),
         #     os.path.join(checkpoint_dir, "encoder_epoch_{}.pth".format(epoch)))
@@ -651,9 +651,9 @@ plt.savefig(os.path.join(
 idx_epoch = epoch-args.start_epoch
 last_average_valid_perfs = np.mean(valid_perfs[max((idx_epoch - args.save_freq + 1), 0):idx_epoch + 1])
 if last_average_valid_perfs < best_valid_perf:
-    setups = pd.read_table(os.path.join(args.outdir, "pretrain", "setups.tsv"))
+    setups = pd.read_table(os.path.join(args.outdir, "ssl_scnns", "setups.tsv"))
     setups.loc[setups["id"] == run_id, "best_epoch"] = epoch
-    setups.to_csv(os.path.join(args.outdir, "pretrain", "setups.tsv"),
+    setups.to_csv(os.path.join(args.outdir, "ssl_scnns", "setups.tsv"),
         index=False, sep="\t")
 
 module_to_save = model.backbone

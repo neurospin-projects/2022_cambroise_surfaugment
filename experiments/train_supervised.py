@@ -129,7 +129,7 @@ params = ("predict_{}_with_{}_on_{}_surf_order_{}_with_{}_features_fusion_{}_act
 # Prepare process
 run_id = int(time.time())
 setup_logging(level="info", logfile=None)
-checkpoint_dir = os.path.join(args.outdir, "predict_{}".format(args.to_predict))
+checkpoint_dir = os.path.join(args.outdir, "supervised_scnns")
 checkpoint_dir = os.path.join(checkpoint_dir, "checkpoints", str(run_id))
 if not os.path.isdir(checkpoint_dir):
     os.makedirs(checkpoint_dir)
@@ -139,7 +139,7 @@ stats_file = open(os.path.join(checkpoint_dir, "stats.txt"), "a", buffering=1)
 print(" ".join(sys.argv))
 print(" ".join(sys.argv), file=stats_file)
 
-setups_path = os.path.join(args.outdir, "predict_{}".format(args.to_predict), "setups.tsv")
+setups_path = os.path.join(args.outdir, "supervised_scnns", "setups.tsv")
 if not os.path.exists(setups_path):
     setups = pd.DataFrame({"id": [], "args": [], "best_epoch": [], "best_param": [], "best_value": []})
     setups = setups.astype({"id": int})
@@ -160,7 +160,7 @@ setups = pd.concat([
         "best_param": [1],
         "best_value": [1000]})],
     ignore_index=True)
-setups.to_csv(os.path.join(args.outdir, "predict_{}".format(args.to_predict), "setups.tsv"),
+setups.to_csv(os.path.join(args.outdir, "supervised_scnns", "setups.tsv"),
     index=False, sep="\t")
 print(run_id)
 

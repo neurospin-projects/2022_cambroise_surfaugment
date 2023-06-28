@@ -26,7 +26,7 @@ from utils import params_from_args, encoder_cp_from_model_cp
 
 parser = argparse.ArgumentParser(description="Spherical predictor")
 parser.add_argument(
-    "--data", default="hcp", choices=("hbn", "euaims", "hcp", "openbhb", "privatebhb"),
+    "--data", default="hcp", choices=("hbn", "openbhb", "privatebhb"),
     help="the input cohort name.")
 parser.add_argument(
     "--datadir", metavar="DIR", help="data directory path.", required=True)
@@ -86,63 +86,20 @@ kwargs = {
     "surface-lh": {"metrics": metrics},
 }
 
-if args.data in ["hbn", "euaims"]:
+if args.data == "hbn":
     kwargs["surface-lh"]["symetrized"] = True
     kwargs["surface-rh"]["symetrized"] = True
-    if args.to_predict not in ["sex", "age", "site", "asd"]:
+    if args.to_predict not in ["sex", "age", "site"]:
         all_modalities.append("clinical")
         kwargs["clinical"] = dict(cols=[args.to_predict])
 
-# evaluation_metrics = (
-#     {"mae": mean_absolute_error, "r2": r2_score} if args.method == "regression"
-#     else {"auc": roc_auc_score, "bacc": balanced_accuracy_score})
-# final_metric = "mae" if args.method == "regression" else "auc"
-# what_is_best = {"mae": "lower", "r2": "higher", "bacc": "higher", "auc": "higher"}
-# output_activation = nn.Identity()
-# hidden_dim = 256
-# tensor_type = "float"
-# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-# out_to_real_pred_func = []
-# root_mean_squared_error = lambda x, y: mean_squared_error(x, y, squared=False)
-# evaluation_against_real_metric = {"real_rmse": root_mean_squared_error, "real_mae": mean_absolute_error, "r2": r2_score, "correlation": corr_metric}
-# label_prepro = lambda x: x.squeeze()
 
-# if args.method == "classification":
-#     output_dim = len(label_values)
-#     evaluation_metrics = {"accuracy": accuracy_score, "bacc": balanced_accuracy_score,
-#                           "auc": roc_auc_score}
-#     tensor_type = "long"
-#     # tensor_type = "float"
-#     n_bins = 100
-#     output_activation = nn.Softmax(dim=1)
-#     # output_activation = nn.Sigmoid()
-#     # output_activation = nn.Identity()
-#     output_dim = 2
-#     for idx in range(len(train_loaders)):
-#         label_prepro.append(TransparentProcessor())
-#         # out_to_real_pred_func.append(
-#         #     lambda x : x.argmax(1).cpu().detach().numpy())
-#         out_to_real_pred_func.append(
-#             lambda x : x.round().cpu().detach().numpy())
-#         if any([type(value) is np.str_ for value in label_values]):
-#             label_prepro[idx] = OrdinalEncoder()
-#             label_prepro[idx].fit(all_label_data[idx][:, np.newaxis])
-#             print(label_prepro[idx].categories_)
-#             out_to_real_pred_func[idx] = lambda x : label_prepro[idx].inverse_transform(
-#                 x.argmax(1).cpu().detach().unsqueeze(1).numpy()).squeeze()
-#         if output_dim > n_bins:
-#             label_prepro[idx] = KBinsDiscretizer(n_bins=n_bins, encode="ordinal")
-#             label_prepro[idx].fit(all_label_data[idx][:, np.newaxis])
-#             print(label_prepro[idx].bin_edges_)
-#             output_dim = n_bins
 test_size = "defaults"
 stratify = ["sex", "age", "site"]
 validation = None
 if args.data not in ["openbhb", "privatebhb"]:
     test_size = 0.2
     validation = 5
-    if args.to_predict == "asd":
-        stratify.append("asd")
 
 dataset = DataManager(
     dataset=args.data, datasetdir=args.datadir, modalities=all_modalities,

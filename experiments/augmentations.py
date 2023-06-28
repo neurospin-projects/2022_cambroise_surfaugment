@@ -1,7 +1,5 @@
 import numpy as np
 import torch
-from PIL import ImageFilter
-import random
 from collections import namedtuple
 
 class Transformer(object):
@@ -71,29 +69,6 @@ class Transformer(object):
                     s += "\n\t- "+trf.__str__()
                 s += "\n"
         return
-
-
-class RescaleAsImage(object):
-    metric_limits = {
-        "thickness": [0, 5],
-        "curv": [-5, 5], #[-94.7961654663086, 109.49639892578125],
-        "sulc": [-16.196352005004883, 18.371854782104492],
-    }
-
-    def __init__(self, metrics, feature_range=(0, 255), channel_dim=0):
-        self.metrics = metrics
-        self.feature_range = feature_range
-        self.channel_dim = channel_dim
-
-    def __call__(self, data):
-        rescaled_data = data.clone()
-        for idx, name in enumerate(self.metrics):
-            torch_idx =  torch.LongTensor([[[idx]]])
-            X_std = (np.clip(torch.take_along_dim(data, torch_idx, self.channel_dim) - self.metric_limits[name][0], 0, self.metric_limits[name][1] - self.metric_limits[name][0]) / 
-                     (self.metric_limits[name][1] - self.metric_limits[name][0]))
-            rescaled_values = X_std * (self.feature_range[1] - self.feature_range[0]) + self.feature_range[0]
-            rescaled_data = rescaled_data.scatter_(self.channel_dim, torch_idx, rescaled_values)
-        return rescaled_data
 
 
 class Reshape(object):

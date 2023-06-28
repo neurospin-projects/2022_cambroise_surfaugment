@@ -99,7 +99,8 @@ def cases(latent_dim=128, batch_size=1024):
         "blur": True, "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
         simCLR_base_group={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
         "blur": True, "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
-        supervised={"supervised": True})
+        sex_supervised={"supervised": True, "latent_dim": latent_dim, "batch_size": batch_size, "to_predict": "sex"},
+        age_supervised={"supervised": True, "latent_dim": latent_dim, "batch_size": batch_size, "to_predict": "age"})
     return cases
 cases = cases(128, 1024)
 best_cp_per_case = dict()

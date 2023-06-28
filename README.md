@@ -73,8 +73,10 @@ change the script's `--method` variabe to `poe`, `moe`, or `joint_elbo`
 respectively. By default, `joint_elbo` is selected.
 
 
-Perform the proposed Digital Avatars Aanalysis (DAA) on HBN by running
-the following commands in a shell:
+By running the following commands in a shell, you will train three self 
+supervised scnns els with the three proposed combinations of augmentations,
+two supervised scnns (on on age and the other on sex) and evaluate them
+for age prediction on BHB external set:
 
 ```
 cd experiments
@@ -112,21 +114,25 @@ python train_supervised.py --datasetdir $DATASETDIR --outdir $OUTDIR
 --latent_dim 128 --batch_size 1024 --normalize --standardize 
 --learning-rate 5e-4 --epochs 100 --to-predict sex --method classification
 
-# Compute validation metrics for each saved SimCLR-SCNNs version
+# Compute validation metrics for each saved SimCLR-SCNN version
 # for some prediction task (default age with regression)
 python compute_validation_metrics.py --datasetdir $DATASETDIR --outdir $OUTDIR 
---setups-file ${OUTDIR}/pretrain/setups.tsv
+--setups-file ${OUTDIR}/ssl_scnns/setups.tsv
 
-# Compute validation metrics for each saved SimCLR-SCNNs version
-# for sex prediction task with classification
-python compute_validation_metrics.py --datasetdir $DATASETDIR --outdir $OUTDIR 
---setups-file ${OUTDIR}/pretrain/setups.tsv --to-predict sex 
---method classification
-
-# Compute validation metrics for each saved Age-supervised SCNNs version
+# Compute validation metrics for each saved supervised SCNN version
 # for age prediction task with regression
 python compute_validation_metrics.py --datasetdir $DATASETDIR --outdir $OUTDIR 
---setups-file ${OUTDIR}/predict_age/setups.tsv
+--setups-file ${OUTDIR}/supervised_scnns/setups.tsv
+
+# Evaluate each best supervised SCNNs version for each setup for age prediction
+# on BHB external test set
+python evaluate_representations.py --data privatebhb --datasetdir $DATASETDIR 
+--outdir $OUTDIR  --setups-file ${OUTDIR}/ssl_scnns/setups.tsv
+
+# Evaluate each best supervised SCNNs version for each setup for age prediction
+# on BHB external test set
+python evaluate_representations.py --data privatebhb --datasetdir $DATASETDIR 
+--outdir $OUTDIR --setups-file ${OUTDIR}/supervised_scnns/setups.tsv
 
 
 ```
