@@ -8,8 +8,8 @@ from iterstrat.ml_stratifiers import MultilabelStratifiedShuffleSplit
 from torch.utils.data.dataloader import (_MultiProcessingDataLoaderIter,
                                          _SingleProcessDataLoaderIter,
                                          _BaseDataLoaderIter)
-from .fetchers import *
-from .utils import discretizer
+from fetchers import *
+from utils import discretizer
 
 
 class MultimodalDataset(torch.utils.data.Dataset):
@@ -157,17 +157,14 @@ class DataManager(object):
     fetchers = {
         "hbn": make_hbn_fetchers,
         "openbhb": make_openbhb_fetchers,
-        "privatebhb": make_privatebhb_fetchers,
     }
     available_modalities = {
-        "hbn": ["clinical", "rois", "surface-lh", "surface-rh"],
+        "hbn": ["clinical", "surface-lh", "surface-rh"],
         "openbhb": ["surface-lh", "surface-rh"],
-        "privatebhb": ["surface-lh", "surface-rh"]
     }
     defaults = {
         "hbn": hbn_defaults,
         "openbhb": openbhb_defaults,
-        "privatebhb": privatebhb_defaults,
     }
 
     def __init__(self, dataset, datasetdir, modalities, transform=None,

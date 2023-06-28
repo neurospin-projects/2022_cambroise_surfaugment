@@ -1,12 +1,11 @@
 import os
-import inspect
 import numpy as np
 import pandas as pd
 from collections import namedtuple
 from iterstrat.ml_stratifiers import MultilabelStratifiedShuffleSplit
 from sklearn.model_selection import ShuffleSplit
 
-from ..utils import discretizer, extract_and_order_by
+from utils import discretizer, extract_and_order_by
 
 
 Item = namedtuple("Item", ["train_input_path", "test_input_path",
@@ -23,14 +22,6 @@ def fetch_multiblock_wrapper(datasetdir, defaults,
         path to the folder in which to save the data
     defaults: dict
         default values for the wrapped function
-    metadata_fetcher: function, default fetch_metadata_wrapper()
-        function to fetch the metadata. If provided a list of
-        subjects, it must return their metadata only ordered as
-        the list
-    make_fetchers_func: function
-        function to build the fetchers from their wrappers.
-        Must return a dict containing as keys the name of the
-        channels, and values the corresponding fetcher
     get_train_test_split: function or None, default None
         some dataset have predifined train / test splits. This
         function allows the fetcher to access the corresponding subjects
@@ -46,9 +37,7 @@ def fetch_multiblock_wrapper(datasetdir, defaults,
     def fetch_multiblock(
             blocks=defaults["blocks"], test_size=defaults["test_size"],
             stratify=defaults["stratify"], discretize=defaults["discretize"],
-            seed=defaults["seed"], 
-            allow_missing_blocks=defaults["allow_missing_blocks"],
-            overwrite=False, **kwargs):
+            seed=defaults["seed"], overwrite=False, **kwargs):
         """ Fetches and preprocesses multi block data
 
         Parameters
@@ -68,11 +57,6 @@ def fetch_multiblock_wrapper(datasetdir, defaults,
             splitting the data into train / test
         seed: int, default 42
             random seed to split the data into train / test
-        remove_outliers: bool, see defaults
-            if True removes the subjects considered as outliers
-        remove_nans: bool or float, see defaults
-            if True remove the subjects that contains missing values (np.nan).
-            If it is a float, replaces the missing values by this value
         overwrite: bool, default False
             if True forces the fetchers to write all the data, even if it
             already exists
@@ -96,7 +80,6 @@ def fetch_multiblock_wrapper(datasetdir, defaults,
             metadata_path_test = os.path.join(datasetdir, "metadata_test.tsv")
 
         subject_column_name = "participant_id"
-        is_local_overwrite = False
         block_paths = {}
         for block in blocks:
             block_paths[block] = {
@@ -104,43 +87,34 @@ def fetch_multiblock_wrapper(datasetdir, defaults,
                 "subjects": os.path.join(datasetdir, block + "_subjects.npy")
             }
         block_paths["metadata"] = os.path.join(datasetdir, "metadata.tsv")
-        if not os.path.isfile(path) or overwrite or is_local_overwrite:
+        if not os.path.isfile(path) or overwrite:
             subj_per_block = {}
 
             subjects_test = None
 
             if get_train_test_split is not None:
                 subjects_train, subjects_test = get_train_test_split()
-                #subjects = subjects_train
-                # if subjects_test is not None:
-                #     subjects = np.concatenate([subjects_train, subjects_test])
+                if subjects_train is None or subjects_test is None:
+                    test_size = 0.2 if test_size is None else test_size
 
             for block in blocks:
                 new_subj = np.load(block_paths[block]["subjects"], allow_pickle=True)
                 subj_per_block[block] = new_subj
 
-            # Check which subjects arent in all the channels
+            # Check which subjects arent in all the blocks
             common_subjects = sorted(list(
                 set.intersection(*map(set, subj_per_block.values()))))
-            if allow_missing_blocks:
-                all_subjects = set.union(*map(set, subj_per_block.values()))
-                other_subjects = sorted(list(all_subjects.difference(common_subjects)))
             index = {}
             for block in blocks:
                 subjects = subj_per_block[block].tolist()
                 new_index = []
                 for sub in common_subjects:
                     new_index.append(subjects.index(sub))
-                if allow_missing_blocks:
-                    for sub in other_subjects:
-                        if sub in subjects:
-                            new_index.append(subjects.index(sub))
-                        else:
-                            new_index.append(None)
                 index[block] = np.array(new_index)
 
             metadata = pd.read_table(block_paths["metadata"])
-            common_metadata = extract_and_order_by(metadata, subject_column_name, common_subjects)
+            common_metadata = extract_and_order_by(
+                metadata, subject_column_name, common_subjects)
             index_train_subjects = list(range(len(common_subjects)))
             if test_size is not None and test_size > 0:
                 splitter = ShuffleSplit(1, test_size=test_size,
@@ -168,10 +142,7 @@ def fetch_multiblock_wrapper(datasetdir, defaults,
             subjects_train = np.array(common_subjects)[index_train_subjects]
             if test_size is None or test_size > 0:
                 subjects_test = np.array(common_subjects)[index_test_subjects]
-            if allow_missing_blocks:
-                subjects_train = np.array(subjects_train.tolist() + other_subjects)
-                index_train_subjects = (list(index_train_subjects)
-                                        + list(range(len(common_subjects), len(all_subjects))))
+
             index_train = {}
             index_test = {}
             for block in blocks:

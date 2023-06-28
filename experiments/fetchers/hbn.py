@@ -12,7 +12,7 @@ Module provides functions to prepare different datasets from HBN.
 """
 
 # Imports
-from.multiblock_fetcher import fetch_multiblock_wrapper
+from .multiblock_fetcher import fetch_multiblock_wrapper
 
 
 DEFAULTS = {
@@ -21,8 +21,6 @@ DEFAULTS = {
         "stratify": ["age", "sex", "site"],
         "discretize": ["age"],
         "blocks": ["clinical", "surface-lh", "surface-rh"],
-        "remove_outliers": True, "remove_nans": True,
-        "allow_missing_blocks": False,
     }
 }
 

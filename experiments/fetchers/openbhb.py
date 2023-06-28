@@ -7,9 +7,7 @@ DEFAULTS = {
     "multiblock": {
         "test_size": None, "seed": 42,
         "stratify": ["age", "sex", "site"], "discretize": ["age"],
-        "blocks": ["surface-lh", "surface-rh"], "qc": None,
-        "remove_nans": True, "remove_outliers": False,
-        "allow_missing_blocks": False,
+        "blocks": ["surface-lh", "surface-rh"]
     }
 }
 
@@ -38,10 +36,14 @@ def get_train_test_split_wrapper(datasetdir):
             test subjects if available, None otherwise
         """
         subject_column_name = "participant_id"
-        subjects = pd.read_table(os.path.join(
-            datasetdir, "train_subjects.tsv"))[subject_column_name].values
-        subjects_test = pd.read_table(os.path.join(
-            datasetdir, "test_subjects.tsv"))[subject_column_name].values
+        subjects = None
+        subjects_test = None
+        if os.path.exists(os.path.join(datasetdir, "train_subjects.tsv")):
+            subjects = pd.read_table(os.path.join(
+                datasetdir, "train_subjects.tsv"))[subject_column_name].values
+        if os.path.exists(os.path.join(datasetdir, "test_subjects.tsv")):
+            subjects_test = pd.read_table(os.path.join(
+                datasetdir, "test_subjects.tsv"))[subject_column_name].values
         return subjects, subjects_test
     return get_train_test_split
 

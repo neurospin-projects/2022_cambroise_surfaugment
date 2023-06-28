@@ -48,7 +48,7 @@ In order to be able to run the experiments, you need to have access to [HBN]
 (http://fcon_1000.projects.nitrc.org/indi/cmi_healthy_brain_network/) or
 [BHB](https://ieee-dataport.org/open-access/openbhb-multi-site-brain-mri-
 dataset-age-prediction-and-debiasing) data. Then, you must provide each script 
-the path to these data setting the `--datasetdir` parameter.
+the path to these data setting the `--datadir` parameter.
 The data folder must contains at least 8 files:
 - **surface-lh_data.npy**: an array with 2 dimensions, the first corresponding to
   the subjects, the second to the different metric for each ROI.
@@ -95,53 +95,53 @@ export OUTDIR=/path/to/the/output/directory
 
 # /!\ Long run /!\ Launch the training of a SimCLR-SCNN with Base
 # augmentations 
-python train_ssl.py --datasetdir $DATASETDIR --outdir $OUTDIR 
---latent_dim 128 --batch_size 1024 --normalize --standardize 
+python train_ssl.py --datadir $DATASETDIR --outdir $OUTDIR 
+--latent-dim 128 --batch-size 1024 --normalize --standardize 
 --cutout --blur --noise --learning-rate 2e-3 --epochs 400 
 --loss-param 2
 
 # /!\ Long run /!\ Launch the training of a SimCLR-SCNN with Base + HemiMixUp
 # augmentations 
-python train_ssl.py --datasetdir $DATASETDIR --outdir $OUTDIR 
---latent_dim 128 --batch_size 1024 --normalize --standardize 
+python train_ssl.py --datadir $DATASETDIR --outdir $OUTDIR 
+--latent-dim 128 --batch-size 1024 --normalize --standardize 
 --cutout --blur --noise --learning-rate 2e-3 --epochs 400 
 --loss-param 2 --hemimixup 0.3
 
 # /!\ Long run /!\ Launch the training of a SimCLR-SCNN with Base + GroupMixUp
 # augmentations 
-python train_ssl.py --datasetdir $DATASETDIR --outdir $OUTDIR 
---latent_dim 128 --batch_size 1024 --normalize --standardize 
+python train_ssl.py --datadir $DATASETDIR --outdir $OUTDIR 
+--latent-dim 128 --batch-size 1024 --normalize --standardize 
 --cutout --blur --noise --learning-rate 2e-3 --epochs 400 
 --loss-param 2 --groupmixup 0.4
 
 # /!\ Long run /!\ Launch the training of a Age-supervised SCNN
-python train_supervised.py --datasetdir $DATASETDIR --outdir $OUTDIR 
---latent_dim 128 --batch_size 1024 --normalize --standardize 
+python train_supervised.py --datadir $DATASETDIR --outdir $OUTDIR 
+--latent-dim 128 --batch-size 1024 --normalize --standardize 
 --learning-rate 5e-4 --epochs 100 --loss l1
 
 # /!\ Long run /!\ Launch the training of a Sex-supervised SCNN
-python train_supervised.py --datasetdir $DATASETDIR --outdir $OUTDIR 
---latent_dim 128 --batch_size 1024 --normalize --standardize 
+python train_supervised.py --datadir $DATASETDIR --outdir $OUTDIR 
+--latent-dim 128 --batch-size 1024 --normalize --standardize 
 --learning-rate 5e-4 --epochs 100 --to-predict sex --method classification
 
 # Compute validation metrics for each saved SimCLR-SCNN version
 # for some prediction task (default age with regression)
-python compute_validation_metrics.py --datasetdir $DATASETDIR --outdir $OUTDIR 
+python compute_validation_metrics.py --datadir $DATASETDIR --outdir $OUTDIR 
 --setups-file ${OUTDIR}/ssl_scnns/setups.tsv
 
 # Compute validation metrics for each saved supervised SCNN version
 # for age prediction task with regression
-python compute_validation_metrics.py --datasetdir $DATASETDIR --outdir $OUTDIR 
+python compute_validation_metrics.py --datadir $DATASETDIR --outdir $OUTDIR 
 --setups-file ${OUTDIR}/supervised_scnns/setups.tsv
 
 # Evaluate each best supervised SCNNs version for each setup for age prediction
 # on BHB external test set
-python evaluate_representations.py --data privatebhb --datasetdir $DATASETDIR 
+python evaluate_representations.py --data privatebhb --datadir $DATASETDIR 
 --outdir $OUTDIR  --setups-file ${OUTDIR}/ssl_scnns/setups.tsv
 
 # Evaluate each best supervised SCNNs version for each setup for age prediction
 # on BHB external test set
-python evaluate_representations.py --data privatebhb --datasetdir $DATASETDIR 
+python evaluate_representations.py --data privatebhb --datadir $DATASETDIR 
 --outdir $OUTDIR --setups-file ${OUTDIR}/supervised_scnns/setups.tsv
 
 
