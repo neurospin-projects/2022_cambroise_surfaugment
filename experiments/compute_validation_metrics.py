@@ -3,7 +3,6 @@ import json
 import numpy as np
 import pandas as pd
 import argparse
-import parse
 import torch
 import joblib
 from tqdm import tqdm
@@ -17,7 +16,7 @@ from sklearn.metrics import (
 from sklearn.preprocessing import (
     KBinsDiscretizer, StandardScaler,OrdinalEncoder)
 
-from multimodaldatasets.datasets import DataManager
+from datasets import DataManager
 from surfify.utils import icosahedron, downsample, downsample_data
 from surfify.models import SphericalHemiFusionEncoder
 from augmentations import Normalize, Reshape, Transformer

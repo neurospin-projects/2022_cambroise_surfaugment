@@ -44,16 +44,20 @@ conda activate corticalmixup
 
 or install the requirements in your own environment. 
 
-In order to be able to run the experiments, you need to have access to HBN or
-EUAIMS data. Then, you must provide each script the path to these data setting
-the `--dataset` and `--datasetdir` parameters.
-The data folder must contains at least 5 files:
-- **rois_data.npy**: an array with 2 dimensions, the first corresponding to
+In order to be able to run the experiments, you need to have access to [HBN]
+(http://fcon_1000.projects.nitrc.org/indi/cmi_healthy_brain_network/) or
+[BHB](https://ieee-dataport.org/open-access/openbhb-multi-site-brain-mri-
+dataset-age-prediction-and-debiasing) data. Then, you must provide each script 
+the path to these data setting the `--datasetdir` parameter.
+The data folder must contains at least 8 files:
+- **surface-lh_data.npy**: an array with 2 dimensions, the first corresponding to
   the subjects, the second to the different metric for each ROI.
-- **rois_subjects.npy**: the list of subjects with the same ordering as
+- **surface-lh_subjects.npy**: the list of subjects with the same ordering as
   in the previous file.
-- **roi_names.npy**: the list of feature names for the `roi_data` file, with
-  the same ordering as its columns.
+- **surface-rh_data.npy**: an array with 2 dimensions, the first corresponding to
+  the subjects, the second to the different metric for each ROI.
+- **surface-rh_subjects.npy**: the list of subjects with the same ordering as
+  in the previous file.
 - **clinical_data.npy**: an array with 2 dimensions, the first corresponding
   to the subjects, the second to the different score values.
 - **clinical_subjects.npy**: the list of subjects with the same ordering as
@@ -65,13 +69,19 @@ The data folder must contains at least 5 files:
   to the `_subjects` files, `sex` with numerically encoded sex, `age` with
   continuous age, and `site` with acquisition site names.
 
+For BHB, the fetcher use by default the provided split train / test in the 
+original paper \cite{}. If you want to use the same split, you must provide two
+additional files:
+- **train_subjects.tsv**: a table containing the id of the train subjects. It 
+  must simply contain a column `participant_id` with the id of the subjects.
+- **test_subjects.tsv**: a table containing the id of the test subjects. It 
+  must simply contain a column `participant_id` with the id of the subjects.
+Otherwise, it will split the data as for HBN.
+The external test set for BHB is not openly available, but you can still get
+results for age MAe by submitting your model [here]
+(https://baobablab.github.io/bhb/challenges/age_prediction_with_site_removal).
 
 ## Experiments
-
-To choose between running the MVAE, MMVAE, and MoPoE-VAE, one needs to
-change the script's `--method` variabe to `poe`, `moe`, or `joint_elbo`
-respectively. By default, `joint_elbo` is selected.
-
 
 By running the following commands in a shell, you will train three self 
 supervised scnns els with the three proposed combinations of augmentations,

@@ -14,9 +14,8 @@ from torch import nn, optim
 from torchvision import transforms
 from surfify.models import SphericalHemiFusionEncoder
 from surfify.utils import setup_logging, icosahedron, downsample_data, downsample
-from brainboard import Board
 
-from multimodaldatasets.datasets import DataManager
+from datasets import DataManager
 from augmentations import Normalize, Reshape, Transformer
 from utils import params_from_args
 
@@ -458,7 +457,6 @@ else:
 
 n_features = len(metrics)
 
-use_board = False
 show_pbar = True
 
 class SelectNthDim(nn.Module):
@@ -556,8 +554,6 @@ for fold, (train_loader, test_loader) in enumerate(
             gamma=0.1)
         # scheduler = optim.lr_scheduler.MultiplicativeLR(optimizer, lambda epoch: 0.97 if epoch % 5 == 0 else 1)
 
-    if args.epochs > 0 and use_board:
-        board = Board(env=str(run_id))
     # linear_model = LogisticRegression()
     start_epoch = 1
     start_time = time.time()
@@ -627,12 +623,6 @@ for fold, (train_loader, test_loader) in enumerate(
                     "loss": stats["loss"], "lr": stats["lr"],
                     "average_time": stats["average_train_epoch_duration"]})
                 pbar.update(1)
-            if use_board:
-                board.update_plot("training loss", epoch, stats["loss"])
-                for name in evaluation_metrics.keys():
-                    board.update_plot(name, epoch, stats[name])
-                for name in evaluation_against_real_metric.keys():
-                    board.update_plot(name, epoch, stats[name])
 
         # Validation
         model.eval()
@@ -682,16 +672,10 @@ for fold, (train_loader, test_loader) in enumerate(
         if args.reduce_lr:
             scheduler.step()
 
-        if use_board:
-            board.update_plot("validation loss", epoch, stats["validation_loss"])
         for name in evaluation_metrics.keys():
             all_metrics[name][epoch - 1].append(stats["validation_" + name])
-            if use_board:
-                board.update_plot("validation " + name, epoch, stats["validation_" + name])
         for name in evaluation_against_real_metric.keys():
             all_metrics[name][epoch - 1].append(stats["validation_" + name])
-            if use_board:
-                board.update_plot("validation " + name, epoch, stats["validation_" + name])
         if epoch % args.save_freq == 0 and fold == len(train_loaders) - 1:
             dict_to_save = {
                 "epoch": epoch,

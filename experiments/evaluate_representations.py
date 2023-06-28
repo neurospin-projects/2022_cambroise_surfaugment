@@ -19,7 +19,7 @@ from surfify.models import SphericalHemiFusionEncoder
 from surfify.utils import (setup_logging, icosahedron, downsample_data,
                            downsample)
 
-from multimodaldatasets.datasets import DataManager
+from datasets import DataManager
 from augmentations import Normalize, Reshape, Transformer
 from utils import params_from_args, encoder_cp_from_model_cp
 

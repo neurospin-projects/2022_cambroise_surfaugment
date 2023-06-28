@@ -21,9 +21,8 @@ from torchvision import transforms
 from surfify.models import SphericalHemiFusionEncoder
 from surfify.augmentation import SurfCutOut, SurfBlur, SurfNoise, interval
 from surfify.utils import setup_logging, icosahedron, downsample_data, downsample, min_depth_to_get_n_neighbors
-from brainboard import Board
 
-from multimodaldatasets.datasets import DataManager, DataLoaderWithBatchAugmentation
+from datasets import DataManager, DataLoaderWithBatchAugmentation
 from augmentations import Normalize, HemiMixUp, GroupMixUp, Reshape, Transformer
 from ssl_model import simCLR
 
@@ -145,7 +144,12 @@ stats_file = open(os.path.join(checkpoint_dir, "stats.txt"), "a", buffering=1)
 print(" ".join(sys.argv))
 print(" ".join(sys.argv), file=stats_file)
 
-setups = pd.read_table(os.path.join(args.outdir, "ssl_scnns", "setups.tsv"))
+setups_path = os.path.join(args.outdir, "ssl_scnns", "setups.tsv")
+if not os.path.exists(setups_path):
+    setups = pd.DataFrame({"id": [], "args": [], "best_epoch": [], "best_param": [], "best_value": []})
+    setups = setups.astype({"id": int})
+else:
+    setups = pd.read_table(setups_path)
 run_id = int(time.time())
 
 def same_params_but_epochs(args_str):
@@ -436,10 +440,6 @@ if not os.path.isdir(checkpoint_dir):
 
 checkpoint_path = os.path.join(checkpoint_dir, "model_epoch_{}.pth")
 
-use_board = False
-if args.epochs > 0 and use_board:
-    board = Board(env=args)
-
 eval_metrics = {"mae": mean_absolute_error}
 metric_for_perf = "mae"
 regressor_params = [0.01, 0.1, 1, 10, 100]
@@ -495,9 +495,6 @@ for epoch in range(start_epoch, args.epochs + 1):
         stats["loss"] += loss.item()
         stats["step"] = step
     mean_loss = stats["loss"] / len(dataset["train"]) if not np.isinf(stats["loss"]) else losses[epoch-args.start_epoch-1]
-
-    if use_board:
-        board.update_plot("training loss", epoch, mean_loss)
     losses.append(mean_loss)
 
     model.eval()
@@ -581,8 +578,7 @@ for epoch in range(start_epoch, args.epochs + 1):
         stats["valid_loss"] / len(dataset["test"]) if
             (stats["valid_loss"] / len(valid_loader)) < threshold_valid_loss
             or epoch == 1 else valid_losses[epoch-args.start_epoch-1])
-    if use_board:
-        board.update_plot("validation loss", epoch, mean_loss)
+
     valid_losses.append(mean_loss)
     perfs.append(stats[metric_for_perf])
     valid_perfs.append(stats["valid_" + metric_for_perf])
