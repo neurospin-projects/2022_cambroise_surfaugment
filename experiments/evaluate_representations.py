@@ -93,12 +93,12 @@ best_is_low = validation_metric == "mae"
 regressor_params = [0.01, 0.1, 1, 10, 100]
 def cases(latent_dim=128, batch_size=1024):
     cases = dict(
-        simCLR_base={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": 0, "cutout": True, "blur": True,
-        "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
-        simCLR_base_hemi={"algo": "simCLR", "inter_modal_augment": ["gt", 0], "batch_augment": 0, "cutout": True,
-        "blur": True, "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
-        simCLR_base_group={"algo": "simCLR", "inter_modal_augment": 0, "batch_augment": ["gt", 0], "cutout": True,
-        "blur": True, "noise": True, "sigma": 0, "latent_dim": latent_dim, "batch_size": batch_size},
+        simCLR_base={"algo": "simCLR", "hemimixup": 0, "groupmixup": 0, "cutout": True, "blur": True,
+        "noise": True, "latent_dim": latent_dim, "batch_size": batch_size},
+        simCLR_base_hemi={"algo": "simCLR", "hemimixup": ["gt", 0], "groupmixup": 0, "cutout": True,
+        "blur": True, "noise": True, "latent_dim": latent_dim, "batch_size": batch_size},
+        simCLR_base_group={"algo": "simCLR", "hemimixup": 0, "groupmixup": ["gt", 0], "cutout": True,
+        "blur": True, "noise": True, "latent_dim": latent_dim, "batch_size": batch_size},
         sex_supervised={"supervised": True, "latent_dim": latent_dim, "batch_size": batch_size, "to_predict": "sex"},
         age_supervised={"supervised": True, "latent_dim": latent_dim, "batch_size": batch_size, "to_predict": "age"})
     return cases

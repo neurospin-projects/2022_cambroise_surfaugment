@@ -84,64 +84,75 @@ results for age MAe by submitting your model [here]
 ## Experiments
 
 By running the following commands in a shell, you will train three self 
-supervised scnns els with the three proposed combinations of augmentations,
-two supervised scnns (on on age and the other on sex) and evaluate them
-for age prediction on BHB external set:
+supervised scnns models with the three proposed combinations of augmentations,
+two supervised scnns (one on age and the other on sex) and evaluate them
+for age prediction on BHB internal test set and HBN test set:
 
 ```
 cd experiments
-export DATASETDIR=/path/to/my/dataset
+export BHBDATADIR=/path/to/bhb/dataset
+export HBNDATADIR=/path/to/hbn/dataset
 export OUTDIR=/path/to/the/output/directory
 
 # /!\ Long run /!\ Launch the training of a SimCLR-SCNN with Base
 # augmentations 
-python train_ssl.py --datadir $DATASETDIR --outdir $OUTDIR 
+python train_ssl.py --datadir $BHBDATADIR --outdir $OUTDIR 
 --latent-dim 128 --batch-size 1024 --normalize --standardize 
 --cutout --blur --noise --learning-rate 2e-3 --epochs 400 
 --loss-param 2
 
 # /!\ Long run /!\ Launch the training of a SimCLR-SCNN with Base + HemiMixUp
 # augmentations 
-python train_ssl.py --datadir $DATASETDIR --outdir $OUTDIR 
+python train_ssl.py --datadir $BHBDATADIR --outdir $OUTDIR 
 --latent-dim 128 --batch-size 1024 --normalize --standardize 
 --cutout --blur --noise --learning-rate 2e-3 --epochs 400 
 --loss-param 2 --hemimixup 0.3
 
 # /!\ Long run /!\ Launch the training of a SimCLR-SCNN with Base + GroupMixUp
 # augmentations 
-python train_ssl.py --datadir $DATASETDIR --outdir $OUTDIR 
+python train_ssl.py --datadir $BHBDATADIR --outdir $OUTDIR 
 --latent-dim 128 --batch-size 1024 --normalize --standardize 
 --cutout --blur --noise --learning-rate 2e-3 --epochs 400 
 --loss-param 2 --groupmixup 0.4
 
 # /!\ Long run /!\ Launch the training of a Age-supervised SCNN
-python train_supervised.py --datadir $DATASETDIR --outdir $OUTDIR 
+python train_supervised.py --datadir $BHBDATADIR --outdir $OUTDIR 
 --latent-dim 128 --batch-size 1024 --normalize --standardize 
 --learning-rate 5e-4 --epochs 100 --loss l1
 
 # /!\ Long run /!\ Launch the training of a Sex-supervised SCNN
-python train_supervised.py --datadir $DATASETDIR --outdir $OUTDIR 
+python train_supervised.py --datadir $BHBDATADIR --outdir $OUTDIR 
 --latent-dim 128 --batch-size 1024 --normalize --standardize 
 --learning-rate 5e-4 --epochs 100 --to-predict sex --method classification
 
 # Compute validation metrics for each saved SimCLR-SCNN version
 # for some prediction task (default age with regression)
-python compute_validation_metrics.py --datadir $DATASETDIR --outdir $OUTDIR 
+python compute_validation_metrics.py --datadir $BHBDATADIR --outdir $OUTDIR 
 --setups-file ${OUTDIR}/ssl_scnns/setups.tsv
 
 # Compute validation metrics for each saved supervised SCNN version
 # for age prediction task with regression
-python compute_validation_metrics.py --datadir $DATASETDIR --outdir $OUTDIR 
+python compute_validation_metrics.py --datadir $BHBDATADIR --outdir $OUTDIR 
 --setups-file ${OUTDIR}/supervised_scnns/setups.tsv
 
 # Evaluate each best supervised SCNNs version for each setup for age prediction
 # on BHB external test set
-python evaluate_representations.py --data privatebhb --datadir $DATASETDIR 
+python evaluate_representations.py --data openbhb --datadir $BHBDATADIR 
 --outdir $OUTDIR  --setups-file ${OUTDIR}/ssl_scnns/setups.tsv
 
 # Evaluate each best supervised SCNNs version for each setup for age prediction
 # on BHB external test set
-python evaluate_representations.py --data privatebhb --datadir $DATASETDIR 
+python evaluate_representations.py --data openbhb --datadir $BHBDATADIR 
+--outdir $OUTDIR --setups-file ${OUTDIR}/supervised_scnns/setups.tsv
+
+# Evaluate each best supervised SCNNs version for each setup for age prediction
+# on HBN test set
+python evaluate_representations.py --data hbn --datadir $HBNDATADIR 
+--outdir $OUTDIR  --setups-file ${OUTDIR}/ssl_scnns/setups.tsv
+
+# Evaluate each best supervised SCNNs version for each setup for age prediction
+# on HBN test set
+python evaluate_representations.py --data hbn --datadir $HBNDATADIR 
 --outdir $OUTDIR --setups-file ${OUTDIR}/supervised_scnns/setups.tsv
 
 
