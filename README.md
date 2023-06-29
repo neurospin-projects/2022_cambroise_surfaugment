@@ -44,11 +44,10 @@ conda activate corticalmixup
 
 or install the requirements in your own environment. 
 
-In order to be able to run the experiments, you need to have access to [HBN]
-(http://fcon_1000.projects.nitrc.org/indi/cmi_healthy_brain_network/) or
-[BHB](https://ieee-dataport.org/open-access/openbhb-multi-site-brain-mri-
-dataset-age-prediction-and-debiasing) data. Then, you must provide each script 
-the path to these data setting the `--datadir` parameter.
+In order to be able to run the experiments, you need to have access to [HBN](http://fcon_1000.projects.nitrc.org/indi/cmi_healthy_brain_network/)
+or [BHB](https://ieee-dataport.org/open-access/openbhb-multi-site-brain-mri-dataset-age-prediction-and-debiasing)
+data. Then, you must provide each script the path to these data setting the
+`--datadir` parameter.
 The data folder must contains at least 8 files:
 - **surface-lh_data.npy**: an array with 2 dimensions, the first corresponding to
   the subjects, the second to the different metric for each ROI.
