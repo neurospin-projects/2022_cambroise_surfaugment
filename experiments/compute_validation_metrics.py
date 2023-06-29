@@ -25,7 +25,7 @@ from utils import params_from_args, encoder_cp_from_model_cp
 
 parser = argparse.ArgumentParser(description="Spherical predictor")
 parser.add_argument(
-    "--data", default="hcp", choices=("hbn", "openbhb", "privatebhb"),
+    "--data", default="openbhb", choices=("hbn", "openbhb"),
     help="the input cohort name.")
 parser.add_argument(
     "--datadir", metavar="DIR", help="data directory path.", required=True)
@@ -96,7 +96,7 @@ if args.data == "hbn":
 test_size = "defaults"
 stratify = ["sex", "age", "site"]
 validation = None
-if args.data not in ["openbhb", "privatebhb"]:
+if args.data != "openbhb":
     test_size = 0.2
     validation = 5
 
@@ -152,8 +152,7 @@ for fold_idx, loader in enumerate(loaders):
                 suffix = ""
             path_to_scaler = os.path.join(
                 args.datadir, f"{modality}_scaler{suffix}.save")
-            if (not os.path.exists(path_to_scaler) and
-                not args.data == "privatebhb"):
+            if not os.path.exists(path_to_scaler):
                 X[modality] += data[modality].view(
                     (len(data[modality]), -1)).tolist()
     for modality in modalities:
@@ -162,8 +161,7 @@ for fold_idx, loader in enumerate(loaders):
             suffix = ""
         path_to_scaler = os.path.join(
             args.datadir, f"{modality}_scaler{suffix}.save")
-        if (not os.path.exists(path_to_scaler) and
-            not args.data == "privatebhb"):
+        if not os.path.exists(path_to_scaler):
             print("Fit scaler")
             scaler = StandardScaler()
             scaler.fit(X[modality])

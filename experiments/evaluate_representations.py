@@ -27,7 +27,7 @@ from utils import params_from_args, encoder_cp_from_model_cp
 # Get user parameters
 parser = argparse.ArgumentParser(description="Spherical predictor")
 parser.add_argument(
-    "--data", default="openbhb", choices=("hbn", "openbhb", "privatebhb"),
+    "--data", default="openbhb", choices=("hbn", "openbhb"),
     help="the input cohort name.")
 parser.add_argument(
     "--datadir", metavar="DIR", help="data directory path.", required=True)
@@ -117,7 +117,6 @@ for setup_id in setups["id"].values:
         compute_stds = True
     to_predict = args.to_predict
     local_args, supervised = params_from_args(params, args)
-    args.to_predict = to_predict
     if not hasattr(local_args, "algo"):
         local_args.algo = "barlow"
     if not hasattr(local_args, "sigma"):
@@ -129,6 +128,7 @@ for setup_id in setups["id"].values:
     if supervised:
         local_args.supervised = True
     case = matching_args_to_case(local_args, cases)
+    args.to_predict = to_predict
     if case is not None and epoch > 0 and local_args.ico_order == 5:
         if compute_stds:
             metric_per_epoch_per_param = [[[] for _ in range(int(local_args.epochs / 10))] for _ in regressor_params]
@@ -253,7 +253,7 @@ if args.data == "hbn":
 test_size = "defaults"
 stratify = ["sex", "age", "site"]
 validation = None
-if args.data not in ["openbhb", "privatebhb"]:
+if args.data != "openbhb":
     test_size = 0.2
     validation = 5
 
@@ -309,8 +309,7 @@ for fold_idx, loader in enumerate(loaders):
                 suffix = ""
             path_to_scaler = os.path.join(
                 args.datadir, f"{modality}_scaler{suffix}.save")
-            if (not os.path.exists(path_to_scaler) and
-                not args.data == "privatebhb"):
+            if not os.path.exists(path_to_scaler):
                 X[modality] += data[modality].view(
                     (len(data[modality]), -1)).tolist()
     for modality in modalities:
@@ -319,8 +318,7 @@ for fold_idx, loader in enumerate(loaders):
             suffix = ""
         path_to_scaler = os.path.join(
             args.datadir, f"{modality}_scaler{suffix}.save")
-        if (not os.path.exists(path_to_scaler) and
-            not args.data == "privatebhb"):
+        if not os.path.exists(path_to_scaler):
             print("Fit scaler")
             scaler = StandardScaler()
             scaler.fit(X[modality])
@@ -431,8 +429,6 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
             scalers = {mod: None for mod in modalities}
             for modality in modalities:
                 datadir = args.datadir
-                if args.data == "privatebhb":
-                    datadir = datadir.replace(args.data, local_args.data_train)
                 path_to_scaler = os.path.join(
                     datadir, f"{modality}_scaler.save")
                 scaler = joblib.load(path_to_scaler)
@@ -508,27 +504,12 @@ for case_id, (setup_id, checkpoint) in enumerate(zip(setup_ids, checkpoints)):
                 on_the_fly_transform["train"][-1][modality] = transformer
                 on_the_fly_transform["test"][modality] = transformer
         
-        if args.data == "privatebhb":
-            train_datadir = args.datadir.replace(args.data, local_args.data_train)
-            dataset = DataManager(
-                dataset=local_args.data_train, datasetdir=train_datadir,
-                modalities=modalities, stratify=stratify,
-                discretize=["age"], transform=transform,
-                on_the_fly_transform=on_the_fly_transform,
-                overwrite=False, test_size="defaults", **kwargs)
-
-            test_dataset = DataManager(
-                dataset=args.data, datasetdir=args.datadir, modalities=all_modalities,
-                transform=transform, on_the_fly_transform=on_the_fly_transform,
-                overwrite=False, test_size=0, **kwargs)
-            dataset.test_dataset = test_dataset["train"]
-        else:
-            dataset = DataManager(
-                dataset=args.data, datasetdir=args.datadir, modalities=all_modalities,
-                stratify=stratify, discretize=["age"], validation=validation,
-                transform=transform, on_the_fly_transform=on_the_fly_transform,
-                overwrite=False, test_size=test_size, **kwargs)
-        if local_args.data_train == args.data:
+        dataset = DataManager(
+            dataset=args.data, datasetdir=args.datadir, modalities=all_modalities,
+            stratify=stratify, discretize=["age"], validation=validation,
+            transform=transform, on_the_fly_transform=on_the_fly_transform,
+            overwrite=False, test_size=test_size, **kwargs)
+        if args.data == "openbhb":
             dataset.create_val_from_test(
                 val_size=0.5, stratify=["sex", "age", "site"], discretize=["age"])
     
