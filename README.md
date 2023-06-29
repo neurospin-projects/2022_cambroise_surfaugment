@@ -77,8 +77,8 @@ additional files:
   must simply contain a column `participant_id` with the id of the subjects.
 Otherwise, it will split the data as for HBN.
 The external test set for BHB is not openly available, but you can still get
-results for age MAe by submitting your model [here]
-(https://baobablab.github.io/bhb/challenges/age_prediction_with_site_removal).
+results for the predicted brain age Mmean absolute error AE by submitting your 
+model [here](https://baobablab.github.io/bhb/challenges/age_prediction_with_site_removal).
 
 ## Experiments
 
