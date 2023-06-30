@@ -30,8 +30,8 @@ If you have any question about the code or the paper, we are happy to help!
 ## Preliminaries
 
 This code was developed and tested with:
-- Python version 3.9.13
-- PyTorch version 1.13.0
+- Python version 3.10.10
+- PyTorch version 1.15.0
 - CUDA version 11.0
 - The conda environment defined in `environment.yml`
 
@@ -57,20 +57,22 @@ The data folder must contains at least 8 files:
   the subjects, the second to the different metric for each ROI.
 - **surface-rh_subjects.npy**: the list of subjects with the same ordering as
   in the previous file.
+- **metadata.tsv**: a table containing the metadata. It must contain at least
+  4 columns: `participant_id` with the id of the subjects, corresponding
+  to the `_subjects` files, `sex` with numerically encoded or string labels for sex, `age` with
+  continuous age, and `site` with acquisition site names.
+
+For HBN FSIQ prediction, you would require 3 aditional files:
 - **clinical_data.npy**: an array with 2 dimensions, the first corresponding
   to the subjects, the second to the different score values.
 - **clinical_subjects.npy**: the list of subjects with the same ordering as
   in the previous file.
 - **clinical_names.npy** the list of feature names for the `clinical_data`
   file, with the same ordering as its columns.
-- **metadata.tsv**: a table containing the metadata. It must contain at least
-  4 columns: `participant_id` with the id of the subjects, corresponding
-  to the `_subjects` files, `sex` with numerically encoded sex, `age` with
-  continuous age, and `site` with acquisition site names.
 
 For BHB, the fetcher use by default the provided split train / test in the 
-original paper \cite{}. If you want to use the same split, you must provide two
-additional files:
+[original paper](https://www.sciencedirect.com/science/article/pii/S1053811922007522)
+. If you want to use the same split, you must provide two additional files:
 - **train_subjects.tsv**: a table containing the id of the train subjects. It 
   must simply contain a column `participant_id` with the id of the subjects.
 - **test_subjects.tsv**: a table containing the id of the test subjects. It 
