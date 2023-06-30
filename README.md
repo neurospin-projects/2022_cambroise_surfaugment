@@ -1,6 +1,6 @@
 # MixUp brain-cortical augmentations in self-supervised learning
 
-\:+1: If you are using the code please add a star to the repository :+1:
+:+1: If you are using the code please add a star to the repository :+1:
 
 Learning biological markers for a specific brain pathology is often impaired by
  the size of the dataset. With the advent of large open datasets in the general
