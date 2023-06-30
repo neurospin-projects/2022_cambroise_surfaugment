@@ -49,12 +49,14 @@ or [BHB](https://ieee-dataport.org/open-access/openbhb-multi-site-brain-mri-data
 data. Then, you must provide each script the path to these data setting the
 `--datadir` parameter.
 The data folder must contains at least 8 files:
-- **surface-lh_data.npy**: an array with 2 dimensions, the first corresponding to
-  the subjects, the second to the different metric for each ROI.
+- **surface-lh_data.npy**: an array with 3 dimensions, the first corresponding 
+  to the subjects, the second to the mesh vertices and the last for the 
+  different metrics.
 - **surface-lh_subjects.npy**: the list of subjects with the same ordering as
   in the previous file.
-- **surface-rh_data.npy**: an array with 2 dimensions, the first corresponding to
-  the subjects, the second to the different metric for each ROI.
+- **surface-rh_data.npy**: an array with 3 dimensions, the first corresponding 
+  to the subjects, the second to the mesh vertices and the last for the 
+  different metrics.
 - **surface-rh_subjects.npy**: the list of subjects with the same ordering as
   in the previous file.
 - **metadata.tsv**: a table containing the metadata. It must contain at least
@@ -64,7 +66,7 @@ The data folder must contains at least 8 files:
 
 For HBN FSIQ prediction, you would require 3 aditional files:
 - **clinical_data.npy**: an array with 2 dimensions, the first corresponding
-  to the subjects, the second to the different score values.
+  to the subjects, the second to the different scores.
 - **clinical_subjects.npy**: the list of subjects with the same ordering as
   in the previous file.
 - **clinical_names.npy** the list of feature names for the `clinical_data`
