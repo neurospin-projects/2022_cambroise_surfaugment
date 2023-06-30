@@ -72,7 +72,7 @@ For HBN FSIQ prediction, you would require 3 aditional files:
 - **clinical_names.npy** the list of feature names for the `clinical_data`
   file, with the same ordering as its columns.
 
-For BHB, the fetcher use by default the provided split train / test in the 
+For BHB, the fetcher uses by default the provided split train / test in the 
 [original paper](https://www.sciencedirect.com/science/article/pii/S1053811922007522)
 . If you want to use the same split, you must provide two additional files:
 - **train_subjects.tsv**: a table containing the id of the train subjects. It 
