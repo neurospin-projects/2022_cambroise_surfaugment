@@ -32,7 +32,7 @@ If you have any question about the code or the paper, we are happy to help!
 This code was developed and tested with:
 - Python version 3.10.10
 - PyTorch version 1.15.0
-- CUDA version 11.0
+- CUDA version 12.0
 - The conda environment defined in `environment.yml`
 
 First, set up the conda enviroment as follows:
