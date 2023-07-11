@@ -19,7 +19,7 @@ import torch
 from torch import nn, optim
 from torchvision import transforms
 from surfify.models import SphericalHemiFusionEncoder
-from surfify.augmentation import SurfCutOut, SurfBlur, SurfNoise, interval
+from surfify.augmentation import SurfCutOut, SurfBlur, SurfNoise, interval, multichannel_augmentation
 from surfify.utils import setup_logging, icosahedron, downsample_data, downsample, min_depth_to_get_n_neighbors
 
 from datasets import DataManager, DataLoaderWithBatchAugmentation
@@ -292,8 +292,7 @@ if args.groupmixup > 0 or args.standardize:
             scalers[modality] =  transforms.Compose([
                 Reshape((1, -1)),
                 scaler.transform,
-                torch.FloatTensor,
-                torch.squeeze,
+                np.squeeze,
                 Reshape(input_shape),
             ])
         if args.groupmixup > 0:
@@ -356,19 +355,22 @@ for modality in modalities:
         transformer.register(Normalize())
     if args.blur:
         ico = backbone.ico[args.ico_order]
-        trf = SurfBlur(
+        MCSurfBlur = multichannel_augmentation(SurfBlur)
+        trf = MCSurfBlur(
             ico.vertices, ico.triangles,
             sigma=interval((0.1, 1), float),
             cachedir=os.path.join(args.outdir, "cached_ico_infos"))
         transformer.register(trf, probability=0.5)
     if args.noise:
-        trf = SurfNoise(sigma=interval((0.1, 2), float))
+        MCSurfNoise = multichannel_augmentation(SurfNoise)
+        trf = MCSurfNoise(sigma=interval((0.1, 2), float))
         transformer.register(trf, probability=0.5)
     if args.cutout:
         ico = backbone.ico[args.ico_order]
         t = time.time()
         patch_size = min_depth_to_get_n_neighbors(np.ceil(len(ico.vertices) / 4))
-        trf = SurfCutOut(
+        MCSurfCutOut = multichannel_augmentation(SurfCutOut)
+        trf = MCSurfCutOut(
             ico.vertices, ico.triangles,
             patch_size=interval((1, patch_size), int),
             cachedir=os.path.join(args.outdir, "cached_ico_infos"))

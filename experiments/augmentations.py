@@ -1,13 +1,12 @@
 import numpy as np
 import torch
 from collections import namedtuple
+from surfify.augmentation import apply_chained_transforms, BaseTransformer
 
-class Transformer(object):
+class Transformer(BaseTransformer):
     """ Class that can be used to register a sequence of transformations.
     Inspired from https://github.com/Duplums/yAwareContrastiveLearning/
     """
-    Transform = namedtuple("Transform", ["transform", "probability"])
-
     def __init__(self, pipelines=None):
         """ Initialize the class.
         """
@@ -26,7 +25,8 @@ class Transformer(object):
         probability: float, default 1
             the transform is applied with the specified probability.
         """
-        trf = self.Transform(transform=transform, probability=probability)
+        trf = self.Transform(transform=transform, probability=probability,
+                             randomize_per_channel=True)
         assert pipeline is None or pipeline in self.transforms
         if type(self.transforms) is list:
             transforms = [self.transforms]
@@ -46,11 +46,11 @@ class Transformer(object):
             transforms = dict(one_and_only=transforms)
         all_transformed = []
         for transform in transforms.values():
-            transformed = torch.clone(arr)
+            transformed = torch.clone(arr).detach().cpu().numpy()
             for trf in transform:
                 if np.random.rand() < trf.probability:
                     transformed = trf.transform(transformed)
-            all_transformed.append(transformed)
+            all_transformed.append(torch.from_numpy(transformed))
         if len(transforms) == 1:
             all_transformed = all_transformed[0]
         return all_transformed
@@ -76,7 +76,9 @@ class Reshape(object):
         self.shape = shape
     
     def __call__(self, arr):
-        return arr.view(self.shape)
+        if type(arr) is torch.Tensor:
+            return arr.view(self.shape)
+        return arr.reshape(self.shape)
 
 
 class Normalize(object):
