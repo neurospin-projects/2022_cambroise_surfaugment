@@ -89,10 +89,16 @@ class Normalize(object):
         self.channel_dim = channel_dim
 
     def __call__(self, arr):
-        return self.std * ((arr - arr.mean(dim=tuple(range(
-            self.channel_dim + 1, len(arr.shape))), keepdim=True)) / (arr.std(
-                dim=tuple(range(self.channel_dim + 1, len(arr.shape))),
-                keepdim=True) + self.eps)  + self.mean)
+        if type(arr) is torch.Tensor:
+            return self.std * ((arr - arr.mean(dim=tuple(range(
+                self.channel_dim + 1, len(arr.shape))), keepdim=True)) / (arr.std(
+                    dim=tuple(range(self.channel_dim + 1, len(arr.shape))),
+                    keepdim=True) + self.eps)  + self.mean)
+        return self.std * ((arr - arr.mean(axis=tuple(range(
+                self.channel_dim + 1, len(arr.shape))), keepdims=True)) / (arr.std(
+                    axis=tuple(range(self.channel_dim + 1, len(arr.shape))),
+                    keepdims=True) + self.eps)  + self.mean)
+
 
 class GroupMixUp(object):
     def __init__(self, p, p_corrupt, across_channels=True,
