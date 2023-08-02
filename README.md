@@ -166,6 +166,6 @@ python evaluate_representations.py --data hbn --datadir $HBNDATADIR
 Citation
 ========
 
-C. Ambroise, V. Frouin, B. Dufumier, E. Duchesnay and A. Grigis, *MixUp brain-cortical augmentation for self-supervised
+C. Ambroise, V. Frouin, B. Dufumier, E. Duchesnay and A. Grigis, *MixUp brain-cortical augmentations in self-supervised
 learning*, Machine Learning in Clinical Neuroimaging (MLCN) 2023.
 
