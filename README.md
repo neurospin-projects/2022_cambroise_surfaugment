@@ -23,7 +23,9 @@ supervised learning performs comparably to supervised baselines, but
 generalizes better to different tasks and datasets. In addition, the learned 
 representations are improved by the proposed MixUp augmentations.
 
-This is the official repository for our unpublished paper associated code.
+This is the official repository for our paper published in MICCAI workshop MLCN
+2023 associated code. Some additional ablation results are available in the
+file **_CA_MLCN_2023_ablation.pdf** to compare baseline augmentations.
 If you have any question about the code or the paper, we are happy to help!
 
 
@@ -164,5 +166,6 @@ python evaluate_representations.py --data hbn --datadir $HBNDATADIR
 Citation
 ========
 
-No paper has yet been published about this work.
+C. Ambroise, V. Frouin, B. Dufumier, E. Duchesnay and A. Grigis, *MixUp brain-cortical augmentation for self-supervised
+learning*, Machine Learning in Clinical Neuroimaging (MLCN) 2023.
 
